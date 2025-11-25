@@ -1,6 +1,9 @@
 package main
 
-import "runtime"
+import (
+	"runtime"
+	"unsafe"
+)
 
 var xorshift32State uint32 = 1
 
@@ -34,15 +37,16 @@ func testNonPointerHeap() {
 		maxSliceSize = 64
 	}
 	// Allocate roughly 0.5MB of memory.
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 1000000; i++ {
 		// Pick a random index that the optimizer can't predict.
 		index := randuint32() % 4
 
 		// Check whether the contents of the previous allocation was correct.
 		rand := randSeeds[index]
-		for _, b := range scalarSlices[index] {
+		for i, b := range scalarSlices[index] {
 			rand = xorshift32(rand)
 			if b != byte(rand) {
+				println("corruption at", uintptr(unsafe.Pointer(&scalarSlices[index][i])))
 				panic("memory was overwritten!")
 			}
 		}

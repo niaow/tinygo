@@ -211,9 +211,11 @@ func syscall_runtime_envs() []string {
 	return envs
 }
 
+var putCharBuf byte
+
 func putchar(c byte) {
-	buf := [1]byte{c}
-	libc_write(1, unsafe.Pointer(&buf[0]), 1)
+	putCharBuf = c
+	libc_write(1, unsafe.Pointer(&putCharBuf), 1)
 }
 
 func ticksToNanoseconds(ticks timeUnit) int64 {
