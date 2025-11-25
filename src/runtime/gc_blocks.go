@@ -558,17 +558,6 @@ func markCurrentGoroutineStack(sp uintptr) {
 	markRoot(0, sp)
 }
 
-// startMark starts the marking process on a root and all of its children.
-func startMark(root gcBlock) {
-	// Mark the object.
-	root.setState(blockStateMark)
-
-	// Add the object to the mark list.
-	obj := (*objHeader)(root.pointer())
-	obj.next = markList
-	markList = obj
-}
-
 // markList is a singly-linked list of objects that have been marked but not scanned.
 var markList *objHeader
 
@@ -583,59 +572,12 @@ func finishMark() {
 		}
 		markList = obj.next
 
-		// Create a scanner for the object.
-		scanner := obj.layout.scanner()
-		if scanner.pointerFree() {
-			// This object does not contain any pointers.
-			// There is nothing to scan.
-			continue
-		}
-
 		// Find the bounds of the object.
 		start := uintptr(unsafe.Pointer(obj)) + align(unsafe.Sizeof(objHeader{}))
 		end := blockFromAddr(uintptr(unsafe.Pointer(obj))).findNext().address()
 
-		// Find and mark referenced objects.
-		for addr := start; addr != end; addr += unsafe.Alignof(addr) {
-			// Load the word.
-			word := *(*uintptr)(unsafe.Pointer(addr))
-
-			if !scanner.nextIsPointer(word, start, addr) {
-				// Not a heap pointer.
-				continue
-			}
-
-			// Find the corresponding memory block.
-			referencedBlock := blockFromAddr(word)
-
-			if referencedBlock.state() == blockStateFree {
-				// The to-be-marked object doesn't actually exist.
-				// This is probably a false positive.
-				if gcDebug {
-					println("found reference to free memory:", word, "at:", addr)
-				}
-				continue
-			}
-
-			// Move to the block's head.
-			referencedBlock = referencedBlock.findHead()
-
-			if referencedBlock.state() == blockStateMark {
-				// The block has already been marked by something else.
-				continue
-			}
-
-			// Mark block.
-			if gcDebug {
-				println("marking block:", referencedBlock)
-			}
-			referencedBlock.setState(blockStateMark)
-
-			// Add the referenced object to the mark list.
-			refObjHdr := (*objHeader)(referencedBlock.pointer())
-			refObjHdr.next = markList
-			markList = refObjHdr
-		}
+		// Scan the object.
+		obj.layout.scan(start, end)
 	}
 }
 
@@ -654,7 +596,14 @@ func markRoot(addr, root uintptr) {
 			if gcDebug {
 				println("found unmarked pointer", root, "at address", addr)
 			}
-			startMark(head)
+
+			// Mark the object.
+			head.setState(blockStateMark)
+
+			// Add the object to the mark list.
+			obj := (*objHeader)(head.pointer())
+			obj.next = markList
+			markList = obj
 		}
 	}
 }

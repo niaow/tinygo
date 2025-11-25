@@ -67,16 +67,16 @@ func (gcl *gcLayout) set(ptr unsafe.Pointer) {
 	gcl.layout = uintptr(ptr)
 }
 
-func (gcl gcLayout) scanner() gcObjectScanner {
-	scanner := gcObjectScanner{}
+// scan an object using this layout information.
+// The starting address is inclusive and the ending address is exclusive.
+func (gcl gcLayout) scan(start, end uintptr) {
 	layout := gcl.layout
-	if layout == 0 {
+	switch {
+	case layout == 0:
 		// Unknown layout. Assume all words in the object could be pointers.
-		// This layout value below corresponds to a slice of pointers like:
-		//     make(*byte, N)
-		scanner.size = 1
-		scanner.bitmap = 1
-	} else if layout&1 != 0 {
+		markRoots(start, end)
+
+	case layout&1 != 0:
 		// Layout is stored directly in the integer value.
 		// Determine format of bitfields in the integer.
 		const layoutBits = uint64(unsafe.Sizeof(layout) * 8)
@@ -94,59 +94,69 @@ func (gcl gcLayout) scanner() gcObjectScanner {
 
 		// Extract values from the bitfields.
 		// See comment at the top of this file for more information.
-		scanner.size = (layout >> 1) & (1<<sizeFieldBits - 1)
-		scanner.bitmap = layout >> (1 + sizeFieldBits)
-	} else {
+		size := (layout >> 1) & (1<<sizeFieldBits - 1)
+		mask := layout >> (1 + sizeFieldBits)
+
+		// Scan with this mask.
+		scanSimple(start, end, size, mask)
+
+	default:
 		// Layout is stored separately in a global object.
 		layoutAddr := unsafe.Pointer(layout)
-		scanner.size = *(*uintptr)(layoutAddr)
-		scanner.bitmapAddr = unsafe.Add(layoutAddr, unsafe.Sizeof(uintptr(0)))
+		size := *(*uintptr)(layoutAddr)
+		bitmapAddr := unsafe.Add(layoutAddr, unsafe.Sizeof(uintptr(0)))
+		bitmap := unsafe.Slice((*uint8)(bitmapAddr), (size+7)/8)
+
+		// Scan with this bitmap.
+		scanComplex(start, end, size, bitmap)
 	}
-	return scanner
 }
 
-type gcObjectScanner struct {
-	index      uintptr
-	size       uintptr
-	bitmap     uintptr
-	bitmapAddr unsafe.Pointer
+// scan pointers in an object using a mask of offsets in each element.
+// The starting address is inclusive and the ending address is exclusive.
+// The element size is size*unsafe.Alignof(uintptr(0)).
+func scanSimple(start, end, size, mask uintptr) {
+	if mask == 0 {
+		// There are no pointers in this object.
+		return
+	}
+
+	rem := end - start
+	step := size * unsafe.Alignof(start)
+	for rem >= step {
+		scanWithMask(start, mask)
+		rem -= step
+		start += step
+	}
 }
 
-func (scanner *gcObjectScanner) pointerFree() bool {
-	if scanner.bitmapAddr != nil {
-		// While the format allows for large objects without pointers, this is
-		// optimized by the compiler so if bitmapAddr is set, we know that there
-		// are at least some pointers in the object.
-		return false
+// scan pointers in an object using a bitmap of offsets in each element.
+func scanComplex(start, end, size uintptr, bitmap []uint8) {
+	rem := end - start
+	step := size * unsafe.Alignof(start)
+	for rem >= step {
+		scanWithBitmap(start, bitmap)
+		rem -= step
+		start += step
 	}
-	// If the bitmap is zero, there are definitely no pointers in the object.
-	return scanner.bitmap == 0
 }
 
-func (scanner *gcObjectScanner) nextIsPointer(word, parent, addrOfWord uintptr) bool {
-	index := scanner.index
-	scanner.index++
-	if scanner.index == scanner.size {
-		scanner.index = 0
+// scan pointers in an object using a large bitmap of offsets.
+func scanWithBitmap(addr uintptr, bitmap []uint8) {
+	const maskStep = 8 * unsafe.Alignof(addr)
+	for i, mask := range bitmap {
+		scanWithMask(addr+uintptr(i)*maskStep, uintptr(mask))
 	}
+}
 
-	if !isOnHeap(word) {
-		// Definitely isn't a pointer.
-		return false
-	}
-
-	// Might be a pointer. Now look at the object layout to know for sure.
-	if scanner.bitmapAddr != nil {
-		if (*(*uint8)(unsafe.Add(scanner.bitmapAddr, index/8))>>(index%8))&1 == 0 {
-			return false
+// scan pointers in an object using a mask of offsets.
+func scanWithMask(addr uintptr, mask uintptr) {
+	// TODO: use ctz if available?
+	for mask != 0 {
+		if mask&1 != 0 {
+			markRoot(addr, *(*uintptr)(unsafe.Pointer(addr)))
 		}
-		return true
+		mask >>= 1
+		addr += unsafe.Alignof(addr)
 	}
-	if (scanner.bitmap>>index)&1 == 0 {
-		// not a pointer!
-		return false
-	}
-
-	// Probably a pointer.
-	return true
 }

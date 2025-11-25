@@ -16,7 +16,12 @@ type gcLayout struct {
 func (gcl *gcLayout) set(ptr unsafe.Pointer) {
 }
 
-func (gcl *gcLayout) scanner() gcObjectScanner {
+func (gcl gcLayout) scan(start, end uintptr) {
+	// Treat every possible address as a pointer.
+	markRoots(start, end)
+}
+
+func (gcl gcLayout) scanner() gcObjectScanner {
 	return gcObjectScanner{}
 }
 
