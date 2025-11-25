@@ -6,13 +6,21 @@
 
 package runtime
 
+import "unsafe"
+
 const preciseHeap = false
 
-type gcObjectScanner struct {
+type gcLayout struct {
 }
 
-func newGCObjectScanner(block gcBlock) gcObjectScanner {
+func (gcl *gcLayout) set(ptr unsafe.Pointer) {
+}
+
+func (gcl *gcLayout) scanner() gcObjectScanner {
 	return gcObjectScanner{}
+}
+
+type gcObjectScanner struct {
 }
 
 func (scanner *gcObjectScanner) pointerFree() bool {
