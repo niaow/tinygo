@@ -578,10 +578,10 @@ func runGC() (freeBytes uintptr) {
 
 	// Sweep phase: free all non-marked objects and unmark marked objects for
 	// the next collection cycle.
-	freeBytes = sweep()
+	sweep()
 
 	// Rebuild the free ranges.
-	buildFreeRanges()
+	freeBytes = buildFreeRanges()
 
 	// Show how much has been sweeped, for debugging.
 	if gcDebug {
@@ -684,15 +684,14 @@ func markRoot(addr, root uintptr) {
 }
 
 // Sweep goes through all memory and frees unmarked memory.
-// It returns how many bytes are free in the heap after the sweep.
-func sweep() (freeBytes uintptr) {
+func sweep() {
 	// Compute the bounds of the heap.
 	metadataStart := metadataStart
 	endBlock := endBlock
 	metadataEnd := unsafe.Add(metadataStart, (endBlock+blocksPerStateByte-1)/blocksPerStateByte)
 
 	// Remove and count frees of each type.
-	var freedHeads, freedTails, oldFreeBlocks uintptr
+	var freedHeads, freedTails uintptr
 	var carry byte
 	for metaPtr := metadataStart; metaPtr != metadataEnd; metaPtr = unsafe.Add(metaPtr, 1) {
 		// Fetch the state byte.
@@ -706,10 +705,6 @@ func sweep() (freeBytes uintptr) {
 			}
 			continue
 		}
-
-		// Count existing free blocks in the state byte.
-		freeBlocks := ((1 << blocksPerStateByte) - 1) &^ ((stateByte >> blocksPerStateByte) | stateByte)
-		oldFreeBlocks += uintptr(count4LUT[freeBlocks])
 
 		// Find and count unmarked heads.
 		unmarkedHeads := (stateByte &^ (stateByte >> blocksPerStateByte)) & (blockStateHigh - 1)
@@ -737,24 +732,10 @@ func sweep() (freeBytes uintptr) {
 		*stateBytePtr = markedHeads | (liveTails << blocksPerStateByte)
 	}
 
-	// Subtact trailing mask entries that do not correspond to blocks.
-	oldFreeBlocks -= (blocksPerStateByte - 1) - ((uintptr(endBlock) + blocksPerStateByte - 1) % blocksPerStateByte)
-
 	// Update the free metrics.
 	gcFrees += uint64(freedHeads)
 	freedBlocks := freedHeads + freedTails
 	gcFreedBlocks += uint64(freedBlocks)
-
-	if gcDebug {
-		println("sweeep:")
-		println("- freed objects:       ", uint(freedHeads))
-		println("- freed blocks:        ", uint(freedBlocks))
-		println("- existing free blocks:", uint(oldFreeBlocks))
-		println("- total free blocks:   ", uint(freedBlocks+oldFreeBlocks))
-		println("- existing/total (%):  ", uint(100*oldFreeBlocks)/uint(freedBlocks+oldFreeBlocks))
-	}
-
-	return (freedBlocks + oldFreeBlocks) * bytesPerBlock
 }
 
 // count4LUT is a lookup table to count bits in a 4-bit integer.
@@ -779,11 +760,13 @@ var count4LUT = [16]uint8{
 
 // buildFreeRanges rebuilds the freeRanges list.
 // This must be called after a GC sweep or heap grow.
-func buildFreeRanges() {
+// It returns how many bytes are free.
+func buildFreeRanges() (freeBytes uintptr) {
 	// Remove the old free ranges.
 	freeRanges = nil
 
 	block := endBlock
+	var freeBlocks uintptr
 	for {
 		// Skip backwards over occupied blocks.
 		block = block.skipBackOccupied()
@@ -796,13 +779,17 @@ func buildFreeRanges() {
 		block = block.skipBackFree()
 
 		// Insert the free range.
-		insertFreeRange(block.pointer(), uintptr(end-block))
+		len := uintptr(end - block)
+		freeBlocks += len
+		insertFreeRange(block.pointer(), len)
 	}
 
 	if gcDebug {
 		println("free ranges after rebuild:")
 		dumpFreeRangeCounts()
 	}
+
+	return freeBlocks * bytesPerBlock
 }
 
 func dumpFreeRangeCounts() {
