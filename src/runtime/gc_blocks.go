@@ -419,20 +419,24 @@ func alloc(size uintptr, layout unsafe.Pointer) unsafe.Pointer {
 		return unsafe.Pointer(&zeroSizedAlloc)
 	}
 
-	size += align(unsafe.Sizeof(objHeader{}))
-
 	if interrupt.In() {
 		runtimePanicAt(returnAddress(0), "heap alloc in interrupt")
 	}
+
+	// Update the size to account for the object header.
+	rawSize := size
+	size += align(unsafe.Sizeof(objHeader{}))
+
+	// Round the size up to a multiple of bytesPerBlock.
+	neededBlocks := (size + (bytesPerBlock - 1)) / bytesPerBlock
+	size = neededBlocks * bytesPerBlock
 
 	// Make sure there are no concurrent allocations. The heap is not currently
 	// designed for concurrent alloc/GC.
 	gcLock.Lock()
 
-	gcTotalAlloc += uint64(size)
+	gcTotalAlloc += uint64(rawSize)
 	gcMallocs++
-
-	neededBlocks := (size + (bytesPerBlock - 1)) / bytesPerBlock
 	gcTotalBlocks += uint64(neededBlocks)
 
 	// Acquire a range of free blocks.
