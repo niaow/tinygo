@@ -118,7 +118,7 @@ func TestSizeFull(t *testing.T) {
 func buildBinary(t *testing.T, targetString, pkgName string) BuildResult {
 	options := compileopts.Options{
 		Target:        targetString,
-		Opt:           "z",
+		Opt:           "s",
 		Semaphore:     sema,
 		InterpTimeout: 60 * time.Second,
 		Debug:         true,

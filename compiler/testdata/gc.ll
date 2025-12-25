@@ -19,8 +19,8 @@ target triple = "wasm32-unknown-wasi"
 @main.slice1 = hidden global { ptr, i32, i32 } zeroinitializer, align 4
 @main.slice2 = hidden global { ptr, i32, i32 } zeroinitializer, align 4
 @main.slice3 = hidden global { ptr, i32, i32 } zeroinitializer, align 4
-@"runtime/gc.layout:62-2000000000000001" = linkonce_odr unnamed_addr constant { i32, [8 x i8] } { i32 62, [8 x i8] c"\01\00\00\00\00\00\00 " }
-@"runtime/gc.layout:62-0001" = linkonce_odr unnamed_addr constant { i32, [8 x i8] } { i32 62, [8 x i8] c"\01\00\00\00\00\00\00\00" }
+@"runtime/gc.layout:62-0100000000000020" = linkonce_odr unnamed_addr constant { i32, [8 x i8] } { i32 62, [8 x i8] c"\01\00\00\00\00\00\00 " }
+@"runtime/gc.layout:62-0100000000000000" = linkonce_odr unnamed_addr constant { i32, [8 x i8] } { i32 62, [8 x i8] c"\01\00\00\00\00\00\00\00" }
 @"reflect/types.type:basic:complex128" = linkonce_odr constant { i8, ptr } { i8 80, ptr @"reflect/types.type:pointer:basic:complex128" }, align 4
 @"reflect/types.type:pointer:basic:complex128" = linkonce_odr constant { i8, i16, ptr } { i8 -43, i16 0, ptr @"reflect/types.type:basic:complex128" }, align 4
 
@@ -80,10 +80,10 @@ entry:
   %new1 = call align 4 dereferenceable(8) ptr @runtime.alloc(i32 8, ptr nonnull inttoptr (i32 3 to ptr), ptr undef) #3
   call void @runtime.trackPointer(ptr nonnull %new1, ptr nonnull %stackalloc, ptr undef) #3
   store ptr %new1, ptr @main.struct2, align 4
-  %new2 = call align 4 dereferenceable(248) ptr @runtime.alloc(i32 248, ptr nonnull @"runtime/gc.layout:62-2000000000000001", ptr undef) #3
+  %new2 = call align 4 dereferenceable(248) ptr @runtime.alloc(i32 248, ptr nonnull @"runtime/gc.layout:62-0100000000000020", ptr undef) #3
   call void @runtime.trackPointer(ptr nonnull %new2, ptr nonnull %stackalloc, ptr undef) #3
   store ptr %new2, ptr @main.struct3, align 4
-  %new3 = call align 4 dereferenceable(248) ptr @runtime.alloc(i32 248, ptr nonnull @"runtime/gc.layout:62-0001", ptr undef) #3
+  %new3 = call align 4 dereferenceable(248) ptr @runtime.alloc(i32 248, ptr nonnull @"runtime/gc.layout:62-0100000000000000", ptr undef) #3
   call void @runtime.trackPointer(ptr nonnull %new3, ptr nonnull %stackalloc, ptr undef) #3
   store ptr %new3, ptr @main.struct4, align 4
   ret void

@@ -53,6 +53,7 @@ type Config struct {
 
 	// Various compiler options that determine how code is generated.
 	Scheduler          string
+	GC                 string
 	AutomaticStackSize bool
 	DefaultStackSize   uint64
 	MaxStackAlloc      uint64

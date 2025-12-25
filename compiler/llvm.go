@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"go/types"
 	"math/big"
+	"math/bits"
 	"strings"
 
 	"github.com/tinygo-org/tinygo/compileopts"
@@ -231,14 +232,18 @@ func (c *compilerContext) makeGlobalArray(buf []byte, name string, elementType l
 //
 // For details on what's in this value, see src/runtime/gc_precise.go.
 func (c *compilerContext) createObjectLayout(t llvm.Type, pos token.Pos) llvm.Value {
+	newLayout := c.GC == "conservative2" || c.GC == "precise2"
+
 	// Use the element type for arrays. This works even for nested arrays.
 	for {
-		kind := t.TypeKind()
-		if kind == llvm.ArrayTypeKind {
-			t = t.ElementType()
-			continue
-		}
-		if kind == llvm.StructTypeKind {
+		switch t.TypeKind() {
+		case llvm.ArrayTypeKind:
+			if t.ArrayLength() > 0 {
+				t = t.ElementType()
+				continue
+			}
+
+		case llvm.StructTypeKind:
 			fields := t.StructElementTypes()
 			if len(fields) == 1 {
 				t = fields[0]
@@ -248,54 +253,92 @@ func (c *compilerContext) createObjectLayout(t llvm.Type, pos token.Pos) llvm.Va
 		break
 	}
 
-	// Do a few checks to see whether we need to generate any object layout
-	// information at all.
+	// Check if the object contains pointers.
+	if !c.typeHasPointers(t) {
+		var layoutNoPtrs uint64
+		if newLayout {
+			layoutNoPtrs = 1
+		} else {
+			layoutNoPtrs = (uint64(1) << 1) | 1
+		}
+		return llvm.ConstIntToPtr(llvm.ConstInt(c.uintptrType, layoutNoPtrs, false), c.dataPtrType)
+	}
+
+	// Create the object bitmap.
 	objectSizeBytes := c.targetData.TypeAllocSize(t)
 	pointerSize := c.targetData.TypeAllocSize(c.dataPtrType)
 	pointerAlignment := c.targetData.PrefTypeAlignment(c.dataPtrType)
-	if objectSizeBytes < pointerSize {
-		// Too small to contain a pointer.
-		layout := (uint64(1) << 1) | 1
-		return llvm.ConstIntToPtr(llvm.ConstInt(c.uintptrType, layout, false), c.dataPtrType)
-	}
-	bitmap := c.getPointerBitmap(t, pos)
-	if bitmap.BitLen() == 0 {
-		// There are no pointers in this type, so we can simplify the layout.
-		// TODO: this can be done in many other cases, e.g. when allocating an
-		// array (like [4][]byte, which repeats a slice 4 times).
-		layout := (uint64(1) << 1) | 1
-		return llvm.ConstIntToPtr(llvm.ConstInt(c.uintptrType, layout, false), c.dataPtrType)
-	}
 	if objectSizeBytes%uint64(pointerAlignment) != 0 {
 		// This shouldn't happen except for packed structs, which aren't
 		// currently used.
 		c.addError(pos, "internal error: unexpected object size for object with pointer field")
 		return llvm.ConstNull(c.dataPtrType)
 	}
-	objectSizeWords := objectSizeBytes / uint64(pointerAlignment)
+	layoutBits := objectSizeBytes / uint64(pointerAlignment)
+	bitmap := make([]byte, (layoutBits+7)/8)
+	c.fillPointerBitmap(bitmap, pos, uint64(pointerAlignment), t, 0)
+
+	// TODO: compact repeating layouts?
 
 	pointerBits := pointerSize * 8
-	var sizeFieldBits uint64
-	switch pointerBits {
-	case 16:
-		sizeFieldBits = 4
-	case 32:
-		sizeFieldBits = 5
-	case 64:
-		sizeFieldBits = 6
-	default:
-		panic("unknown pointer size")
-	}
-	layoutFieldBits := pointerBits - 1 - sizeFieldBits
+	if newLayout {
+		if c.archFamily() == "avr" {
+			// Try to encode the layout inline.
+			if layoutBits <= 129 {
+				nonZero := bitmap
+				for len(nonZero) > 1 && nonZero[len(nonZero)-1] == 0 {
+					nonZero = nonZero[:len(nonZero)-1]
+				}
+				if len(nonZero) == 1 {
+					layout := (uint64(nonZero[0]) << 8) | ((layoutBits - 2) << 1) | 1
+					return llvm.ConstIntToPtr(llvm.ConstInt(c.uintptrType, layout, false), c.dataPtrType)
+				}
+			}
+		} else {
+			// Try to encode the layout inline.
+			if layoutBits <= pointerBits {
+				// Load the bitmap into a mask.
+				mask := loadLE(bitmap)
 
-	// Try to emit the value as an inline integer. This is possible in most
-	// cases.
-	if objectSizeWords < layoutFieldBits {
-		// If it can be stored directly in the pointer value, do so.
-		// The runtime knows that if the least significant bit of the pointer is
-		// set, the pointer contains the value itself.
-		layout := bitmap.Uint64()<<(sizeFieldBits+1) | (objectSizeWords << 1) | 1
-		return llvm.ConstIntToPtr(llvm.ConstInt(c.uintptrType, layout, false), c.dataPtrType)
+				// Reverse the mask.
+				mask = bits.Reverse64(mask) >> (64 - layoutBits)
+
+				// Encode the mask into the layout.
+				layout := mask << 1
+				mask *= pointerBits
+				if (layout/pointerBits)>>1 == mask {
+					// The mask fits without discarding bits.
+					// Finish the layout.
+					layout |= layoutBits << 1
+					layout |= 1
+					return llvm.ConstIntToPtr(llvm.ConstInt(c.uintptrType, layout, false), c.dataPtrType)
+				}
+			}
+		}
+	} else {
+		pointerBits := pointerSize * 8
+		var sizeFieldBits uint64
+		switch pointerBits {
+		case 16:
+			sizeFieldBits = 4
+		case 32:
+			sizeFieldBits = 5
+		case 64:
+			sizeFieldBits = 6
+		default:
+			panic("unknown pointer size")
+		}
+		layoutFieldBits := pointerBits - 1 - sizeFieldBits
+
+		// Try to emit the value as an inline integer. This is possible in most
+		// cases.
+		if layoutBits < layoutFieldBits {
+			// If it can be stored directly in the pointer value, do so.
+			// The runtime knows that if the least significant bit of the pointer is
+			// set, the pointer contains the value itself.
+			layout := loadLE(bitmap)<<(sizeFieldBits+1) | (layoutBits << 1) | 1
+			return llvm.ConstIntToPtr(llvm.ConstInt(c.uintptrType, layout, false), c.dataPtrType)
+		}
 	}
 
 	// Unfortunately, the object layout is too big to fit in a pointer-sized
@@ -303,23 +346,42 @@ func (c *compilerContext) createObjectLayout(t llvm.Type, pos token.Pos) llvm.Va
 
 	// Try first whether the global already exists. All objects with a
 	// particular name have the same type, so this is possible.
-	globalName := "runtime/gc.layout:" + fmt.Sprintf("%d-%0*x", objectSizeWords, (objectSizeWords+15)/16, bitmap)
+	globalName := fmt.Sprintf("runtime/gc.layout:%d-%0*x", layoutBits, 2*len(bitmap), bitmap)
 	global := c.mod.NamedGlobal(globalName)
 	if !global.IsNil() {
 		return global
 	}
 
-	// Create the global initializer.
-	bitmapBytes := make([]byte, int(objectSizeWords+7)/8)
-	bitmap.FillBytes(bitmapBytes)
-	reverseBytes(bitmapBytes) // big-endian to little-endian
-	var bitmapByteValues []llvm.Value
-	for _, b := range bitmapBytes {
-		bitmapByteValues = append(bitmapByteValues, llvm.ConstInt(c.ctx.Int8Type(), uint64(b), false))
+	// Encode the body.
+	var body []llvm.Value
+	var bodyType llvm.Type
+	var bodyBasicType types.BasicKind
+	if newLayout && c.archFamily() != "avr" {
+		// Encode the body as reversed words.
+		bodyType = c.uintptrType
+		bodyBasicType = types.Uintptr
+		body = make([]llvm.Value, (uint64(len(bitmap))+(pointerSize-1))/pointerSize)
+		for i := range body {
+			data := bitmap[pointerSize*uint64(i):]
+			data = data[:min(uint64(len(data)), pointerSize)]
+			mask := loadLE(data)
+			mask = bits.Reverse64(mask) >> (64 - pointerBits)
+			body[i] = llvm.ConstInt(bodyType, mask, false)
+		}
+	} else {
+		// Encode the body as bytes.
+		bodyType = c.ctx.Int8Type()
+		bodyBasicType = types.Byte
+		body = make([]llvm.Value, len(bitmap))
+		for i, v := range bitmap {
+			body[i] = llvm.ConstInt(bodyType, uint64(v), false)
+		}
 	}
+
+	// Create the global initializer.
 	initializer := c.ctx.ConstStruct([]llvm.Value{
-		llvm.ConstInt(c.uintptrType, objectSizeWords, false),
-		llvm.ConstArray(c.ctx.Int8Type(), bitmapByteValues),
+		llvm.ConstInt(c.uintptrType, layoutBits, false),
+		llvm.ConstArray(bodyType, body),
 	}, false)
 
 	global = llvm.AddGlobal(c.mod, initializer.Type(), globalName)
@@ -349,7 +411,7 @@ func (c *compilerContext) createObjectLayout(t llvm.Type, pos token.Pos) llvm.Va
 			Line: position.Line,
 			Type: c.getDIType(types.NewStruct([]*types.Var{
 				types.NewVar(pos, nil, "numBits", types.Typ[types.Uintptr]),
-				types.NewVar(pos, nil, "data", types.NewArray(types.Typ[types.Byte], int64(len(bitmapByteValues)))),
+				types.NewVar(pos, nil, "data", types.NewArray(types.Typ[bodyBasicType], int64(len(body)))),
 			}, nil)),
 			LocalToUnit: false,
 			Expr:        c.dibuilder.CreateExpression(nil),
@@ -358,6 +420,102 @@ func (c *compilerContext) createObjectLayout(t llvm.Type, pos token.Pos) llvm.Va
 	}
 
 	return global
+}
+
+func loadLE(data []byte) uint64 {
+	var mask uint64
+	for rem := data; len(rem) > 0; rem = rem[:len(rem)-1] {
+		mask <<= 8
+		mask |= uint64(rem[len(rem)-1])
+	}
+	return mask
+}
+
+func (c *compilerContext) fillPointerBitmap(
+	dst []byte,
+	pos token.Pos,
+	ptrAlign uint64,
+	typ llvm.Type,
+	base uint64,
+) {
+	switch typ.TypeKind() {
+	case llvm.IntegerTypeKind, llvm.FloatTypeKind, llvm.DoubleTypeKind:
+		// These types do not contain pointers.
+
+	case llvm.PointerTypeKind:
+		// TODO: exclude function pointers on AVR?
+		dst[base/8] |= 1 << (base % 8)
+
+	case llvm.StructTypeKind:
+		for i, subtyp := range typ.StructElementTypes() {
+			offset := c.targetData.ElementOffset(typ, i)
+			if offset%ptrAlign != 0 {
+				if typeHasPointers(subtyp) {
+					// This error will let the compilation fail, but by continuing
+					// the error can still easily be shown.
+					c.addError(pos, "internal error: allocated struct contains unaligned pointer")
+				}
+				continue
+			}
+			c.fillPointerBitmap(
+				dst, pos, ptrAlign,
+				subtyp, base+(offset/ptrAlign),
+			)
+		}
+
+	case llvm.ArrayTypeKind:
+		len := typ.ArrayLength()
+		if len == 0 {
+			return
+		}
+		subtyp := typ.ElementType()
+		elementSize := c.targetData.TypeAllocSize(subtyp)
+		if elementSize%ptrAlign != 0 {
+			if typeHasPointers(subtyp) {
+				// This error will let the compilation fail (but continues so that
+				// other errors can be shown).
+				c.addError(pos, "internal error: allocated array contains unaligned pointer")
+			}
+			return
+		}
+		elementSize /= ptrAlign
+		for i := uint64(0); i < uint64(len); i++ {
+			c.fillPointerBitmap(
+				dst, pos, ptrAlign,
+				subtyp, base+(i*elementSize),
+			)
+		}
+
+	default:
+		// Should not happen.
+		panic("unknown LLVM type")
+	}
+}
+
+func (c *compilerContext) typeHasPointers(typ llvm.Type) bool {
+	switch typ.TypeKind() {
+	case llvm.IntegerTypeKind, llvm.FloatTypeKind, llvm.DoubleTypeKind:
+		return false
+
+	case llvm.PointerTypeKind:
+		// TODO: exclude function pointers on AVR?
+		return true
+
+	case llvm.StructTypeKind:
+		for _, subtyp := range typ.StructElementTypes() {
+			if c.typeHasPointers(subtyp) {
+				return true
+			}
+		}
+		return false
+
+	case llvm.ArrayTypeKind:
+		return typ.ArrayLength() != 0 && c.typeHasPointers(typ.ElementType())
+
+	default:
+		// Should not happen.
+		panic("unknown LLVM type")
+	}
 }
 
 // getPointerBitmap scans the given LLVM type for pointers and sets bits in a

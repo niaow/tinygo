@@ -139,7 +139,7 @@ func Optimize(mod llvm.Module, config *compileopts.Config) []error {
 		if fn.IsNil() || fn.IsDeclaration() {
 			continue
 		}
-		fn.SetLinkage(llvm.InternalLinkage)
+		//fn.SetLinkage(llvm.InternalLinkage)
 	}
 
 	// Run the ThinLTO pre-link passes, meant to be run on each individual

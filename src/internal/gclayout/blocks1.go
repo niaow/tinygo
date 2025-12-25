@@ -1,3 +1,5 @@
+//go:build gc.precise || gc.boehm
+
 package gclayout
 
 import "unsafe"

@@ -132,14 +132,14 @@ func (c *Config) GC() string {
 	if c.Target.GC != "" {
 		return c.Target.GC
 	}
-	return "conservative"
+	return "conservative2"
 }
 
 // NeedsStackObjects returns true if the compiler should insert stack objects
 // that can be traced by the garbage collector.
 func (c *Config) NeedsStackObjects() bool {
 	switch c.GC() {
-	case "conservative", "custom", "precise", "boehm":
+	case "conservative", "conservative2", "precise2", "custom", "precise", "boehm":
 		for _, tag := range c.BuildTags() {
 			if tag == "tinygo.wasm" {
 				return true

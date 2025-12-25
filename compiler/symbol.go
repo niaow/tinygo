@@ -447,7 +447,8 @@ func (c *compilerContext) parsePragmas(info *functionInfo, f *ssa.Function) {
 			// runtime functions.
 			// This is somewhat dangerous and thus only imported in packages
 			// that import unsafe.
-			if hasUnsafeImport(f.Pkg.Pkg) {
+			// TODO: fix generics
+			if f.Pkg == nil || hasUnsafeImport(f.Pkg.Pkg) {
 				info.nobounds = true
 			}
 		case "//go:noescape":

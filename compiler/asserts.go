@@ -93,6 +93,12 @@ func (b *builder) createSliceToArrayPointerCheck(sliceLen llvm.Value, arrayLen i
 // and unsafe.String. This function must panic if the ptr/len parameters are
 // invalid.
 func (b *builder) createUnsafeSliceStringCheck(name string, ptr, len llvm.Value, elementType llvm.Type, lenType *types.Basic) {
+	if b.info.nobounds {
+		// The //go:nobounds pragma was added to the function to avoid bounds
+		// checking.
+		return
+	}
+
 	// From the documentation of unsafe.Slice and unsafe.String:
 	//   > At run time, if len is negative, or if ptr is nil and len is not
 	//   > zero, a run-time panic occurs.
