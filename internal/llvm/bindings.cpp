@@ -1376,9 +1376,14 @@ static const GEPNoWrapFlags LLVMGoConvertWrapLUT[] = {
 	[LLVMGoGEPUnsigned] = GEPNoWrapFlags::noUnsignedWrap(),
 	[LLVMGoGEPWrapping] = GEPNoWrapFlags::none(),
 };
-#define LLVMGoConvertWrap(w) (LLVMGoConvertWrapLUT[(w)])
+static GEPNoWrapFlags LLVMGoConvertWrap(LLVMGoGEPMode mode) {
+	return LLVMGoConvertWrapLUT[mode];
+}
 #else
-#define LLVMGoConvertWrap(w) (w)
+// There was only an "inbounds" flag prior to LLVM 19.
+static bool LLVMGoConvertWrap(LLVMGoGEPMode mode) {
+	return mode == LLVMGoGEPInboundsForwards || mode == LLVMGoGEPInbounds;
+}
 #endif
 LLVMValueRef LLVMGoConstIndexPointer(
 	LLVMTypeRef elemType,

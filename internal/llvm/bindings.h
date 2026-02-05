@@ -702,7 +702,6 @@ LLVMValueRef LLVMGoConstSub(
 );
 
 // The GEP parameters change between LLVM versions, so use our own.
-#if LLVM_VERSION_MAJOR >= 19
 typedef enum {
 	LLVMGoGEPInboundsForwards,
 	LLVMGoGEPInbounds,
@@ -711,16 +710,6 @@ typedef enum {
 	LLVMGoGEPUnsigned,
 	LLVMGoGEPWrapping,
 } LLVMGoGEPMode;
-#else
-// There was only an "inbounds" flag prior to LLVM 19.
-#define LLVMGoGEPMode bool
-#define LLVMGoGEPInboundsForwards true
-#define LLVMGoGEPInbounds true
-#define LLVMGoGEPForwards false
-#define LLVMGoGEPSigned false
-#define LLVMGoGEPUnsigned false
-#define LLVMGoGEPWrapping false
-#endif
 
 // TODO: add inrange, introduced in LLVM 19
 LLVMValueRef LLVMGoConstIndexPointer(
