@@ -4,6 +4,7 @@ package llvm
 #include "bindings.h"
 */
 import "C"
+import "unsafe"
 
 // TODO: doc
 type Value struct {
@@ -12,9 +13,9 @@ type Value struct {
 
 // String formats the value as it would be printed in IR.
 func (v Value) String() string {
-	cstr := C.LLVMPrintValueToString(v.ptr)
-	defer C.LLVMDisposeMessage(cstr)
-	return C.GoString(cstr)
+	var dst string
+	C.LLVMGoValueString(unsafe.Pointer(&dst), v.ptr)
+	return dst
 }
 
 func (v Value) Type() Type {

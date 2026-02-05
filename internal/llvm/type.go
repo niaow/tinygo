@@ -15,10 +15,10 @@ type Type struct {
 }
 
 // String formats the type as it would be printed in IR.
-func (elemTy Type) String() string {
-	cstr := C.LLVMPrintTypeToString(elemTy.ptr)
-	defer C.LLVMDisposeMessage(cstr)
-	return C.GoString(cstr)
+func (t Type) String() string {
+	var dst string
+	C.LLVMGoTypeString(unsafe.Pointer(&dst), t.ptr)
+	return dst
 }
 
 // Void gets the void type (for returns) in this context.
@@ -30,14 +30,14 @@ func (c Context) Void() Type {
 // Future calls with the same bit-width will return the same type.
 // It panics if the requested bit width is outside the range [1, 2^23].
 func (c Context) Int(bits uint32) Type {
-	checkIntWidth(bits)
-	return Type{C.LLVMIntTypeInContext(c.ptr, C.unsigned(bits))}
+	return Type{C.LLVMIntTypeInContext(c.ptr, intWidth(bits))}
 }
 
-func checkIntWidth(bits uint32) {
+func intWidth(bits uint32) C.unsigned {
 	if bits == 0 || bits > 1<<23 {
 		panic(fmt.Errorf("invalid integer bit width: %d", bits))
 	}
+	return C.unsigned(bits)
 }
 
 // Float32 gets the single-precision floating point type in this context.
@@ -96,8 +96,8 @@ func (c Context) NamedStruct(name string, elements ...Type) Type {
 }
 
 // Info queries information about a type.
-func (elemTy Type) Info() TypeInfo {
-	return TypeInfo{C.LLVMGoGetTypeInfo(elemTy.ptr)}
+func (t Type) Info() TypeInfo {
+	return TypeInfo{C.LLVMGoGetTypeInfo(t.ptr)}
 }
 
 // TypeInfo holds basic information about a type.

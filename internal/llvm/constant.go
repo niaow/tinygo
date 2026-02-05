@@ -15,9 +15,9 @@ type Constant struct {
 }
 
 // Zero returns the zero value of the type (null ptr, int 0, etc.).
-func (elemTy Type) Zero() Constant {
+func (t Type) Zero() Constant {
 	// TODO: is this valid for all types?
-	return Constant{Value{C.LLVMConstNull(elemTy.ptr)}}
+	return Constant{Value{C.LLVMConstNull(t.ptr)}}
 }
 
 // IsConstantZero checks if this is the zero value constant of the type.
@@ -42,10 +42,9 @@ func (c Context) ConstBool(value bool) Constant {
 // It panics if the requested bit width is outside the range [1, 2^23].
 // Future calls with equivalent constants will return the same value.
 func (c Context) ConstInt(bits uint32, value ...uint64) Constant {
-	checkIntWidth(bits)
 	return Constant{Value{C.LLVMGoConstInt(
 		c.ptr,
-		C.unsigned(bits),
+		intWidth(bits),
 		(*C.uint64_t)(unsafe.Pointer(unsafe.SliceData(value))),
 		C.size_t(len(value)),
 	)}}

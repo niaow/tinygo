@@ -18,6 +18,30 @@ static inline Twine toTwine(LLVMGoStringRef ref) {
 	return Twine(toStringRef(ref));
 }
 
+// Stringification
+static void LLVMGoConvertString(void* dst, const std::string &src) {
+	goCloneString(dst, {src.data(), src.size()});
+}
+template<typename T>
+static void LLVMGoPrintToString(void* dst, T src) {
+	std::string str;
+	raw_string_ostream stream(str);
+	src->print(stream);
+	LLVMGoConvertString(dst, str);
+}
+void LLVMGoTypeString(void* dst, LLVMTypeRef src) {
+	LLVMGoPrintToString(dst, unwrap(src));
+}
+void LLVMGoValueString(void* dst, LLVMValueRef src) {
+	LLVMGoPrintToString(dst, unwrap(src));
+}
+void LLVMGoModuleString(void* dst, LLVMModuleRef src) {
+	std::string str;
+	raw_string_ostream stream(str);
+	unwrap(src)->print(stream, nullptr);
+	LLVMGoConvertString(dst, str);
+}
+
 // Target information
 static const std::optional<Reloc::Model> LLVMGoRelocationModelsLUT[] = {
 	[LLVMGoRelocModelDefault] = std::nullopt,
@@ -51,7 +75,7 @@ LLVMTargetMachineRef LLVMGoCreateTargetMachine(
 	auto target = TargetRegistry::lookupTarget(triple, errMsg);
 	if (target == NULL) {
 		// Copy the error string to caller-owned memory.
-		goCloneString(errMsgDst, {errMsg.data(), errMsg.size()});
+		LLVMGoConvertString(errMsgDst, errMsg);
 		return NULL;
 	}
 

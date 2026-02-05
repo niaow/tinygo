@@ -18,6 +18,11 @@ typedef struct {
 // dst is a pointer to a Go string variable.
 void goCloneString(void* dst, LLVMGoStringRef src);
 
+// Stringification
+void LLVMGoTypeString(void* dst, LLVMTypeRef src);
+void LLVMGoValueString(void* dst, LLVMValueRef src);
+void LLVMGoModuleString(void* dst, LLVMModuleRef src);
+
 typedef enum {
 	LLVMGoRelocModelDefault,
 	LLVMGoRelocModelStatic,

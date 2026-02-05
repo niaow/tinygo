@@ -4,6 +4,7 @@ package llvm
 #include "bindings.h"
 */
 import "C"
+import "unsafe"
 
 type Module struct {
 	ptr C.LLVMModuleRef
@@ -27,9 +28,9 @@ func (mod Module) Destroy() {
 }
 
 func (mod Module) String() string {
-	cstr := C.LLVMPrintModuleToString(mod.ptr)
-	defer C.LLVMDisposeMessage(cstr)
-	return C.GoString(cstr)
+	var dst string
+	C.LLVMGoModuleString(unsafe.Pointer(&dst), mod.ptr)
+	return dst
 }
 
 // Get a global value (function/variable) by name.
