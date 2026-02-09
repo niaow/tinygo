@@ -15,12 +15,12 @@ type Context struct {
 // A context is not thread safe.
 // Call Destroy to free memory used by the context.
 func CreateContext() Context {
-	return Context{C.LLVMContextCreate()}
+	return Context{C.LLVMGoContextCreate()}
 }
 
 // Destroy frees memory used by the context.
 func (c Context) Destroy() {
-	C.LLVMContextDispose(c.ptr)
+	C.LLVMGoContextDestroy(c.ptr)
 }
 
 // TODO: put this somewhere better

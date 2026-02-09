@@ -1,0 +1,300 @@
+package llvm_test
+
+import (
+	"slices"
+	"testing"
+
+	"github.com/tinygo-org/tinygo/internal/llvm"
+)
+
+func TestStringAttribute(t *testing.T) {
+	t.Parallel()
+
+	// Create a context to test with.
+	ctx := llvm.CreateContext()
+	defer ctx.Destroy()
+
+	// Create a simple string attribute.
+	attr := ctx.StringAttribute("key", "value")
+
+	// Test stringification.
+	if str := attr.String(); str != "\"key\"=\"value\"" {
+		t.Errorf("unexpected string of string attribute: %q", str)
+	}
+
+	// Try reading the attribute back.
+	key, isString := attr.Kind()
+	if !isString {
+		t.Error("not a string attribute")
+	}
+	if key != "key" {
+		t.Errorf("unexpected key: %q", key)
+	}
+	if isString {
+		value := attr.StringValue()
+		if value != "value" {
+			t.Errorf("unexpected value: %q", value)
+		}
+	}
+
+	// A duplicate attribute should be equal.
+	if ctx.StringAttribute("key", "value") != attr {
+		t.Error("duplicate attribute is not equal")
+	}
+}
+
+func TestEnumAttributes(t *testing.T) {
+	t.Parallel()
+
+	for _, kind := range []llvm.EnumAttribute{
+		llvm.AttributeZeroExtend,
+		llvm.AttributeSignExtend,
+		llvm.AttributeNoAlias,
+		llvm.AttributeNonNull,
+		llvm.AttributeNoUndef,
+		llvm.AttributeReadNone,
+		llvm.AttributeReadOnly,
+		llvm.AttributeWriteOnly,
+	} {
+		kind := kind
+		t.Run(string(kind), func(t *testing.T) {
+			t.Parallel()
+
+			// Create a context to test with.
+			ctx := llvm.CreateContext()
+			defer ctx.Destroy()
+
+			// Create the attribute.
+			attr := ctx.EnumAttribute(kind)
+
+			// Test stringification.
+			if str := attr.String(); str != string(kind) {
+				t.Errorf("unexpected string of attribute: %q", str)
+			}
+
+			// Try reading the attribute back.
+			key, isString := attr.Kind()
+			if isString {
+				t.Error("enum attribute is string")
+			}
+			if key != string(kind) {
+				t.Errorf("unexpected attribute key: %q", key)
+			}
+
+			// A duplicate attribute should be equal.
+			if ctx.EnumAttribute(kind) != attr {
+				t.Error("duplicate attribute is not equal")
+			}
+		})
+	}
+}
+
+func TestIntAttribute(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []struct {
+		kind  llvm.IntAttribute
+		value uint64
+		str   string
+	}{
+		{
+			kind:  llvm.AttributeAlign,
+			value: 4,
+			str:   "align 4",
+		},
+		{
+			kind:  llvm.AttributeAlign,
+			value: 16,
+			str:   "align 16",
+		},
+		{
+			kind:  llvm.AttributeDereferenceable,
+			value: 7,
+			str:   "dereferenceable(7)",
+		},
+		{
+			kind:  llvm.AttributeDereferenceableOrNull,
+			value: 19,
+			str:   "dereferenceable_or_null(19)",
+		},
+	} {
+		c := c
+		t.Run(c.str, func(t *testing.T) {
+			t.Parallel()
+
+			// Create a context to test with.
+			ctx := llvm.CreateContext()
+			defer ctx.Destroy()
+
+			// Create the attribute.
+			attr := ctx.IntAttribute(c.kind, c.value)
+
+			// Test stringification.
+			if str := attr.String(); str != c.str {
+				t.Errorf("unexpected string of attribute: %q", str)
+			}
+
+			// Try reading the attribute back.
+			key, isString := attr.Kind()
+			if isString {
+				t.Error("int attribute is string")
+			}
+			if key != string(c.kind) {
+				t.Errorf("unexpected attribute key: %q", key)
+			}
+			if value := attr.IntValue(); value != c.value {
+				t.Errorf("unexpected attribute value: %q", value)
+			}
+
+			// A duplicate attribute should be equal.
+			if ctx.IntAttribute(c.kind, c.value) != attr {
+				t.Error("duplicate attribute is not equal")
+			}
+		})
+	}
+}
+
+func TestTypeAttribute(t *testing.T) {
+	t.Parallel()
+
+	// Create a context to test with.
+	ctx := llvm.CreateContext()
+	defer ctx.Destroy()
+
+	for _, c := range []struct {
+		kind  llvm.TypeAttribute
+		value llvm.Type
+		str   string
+	}{
+		{
+			kind:  llvm.AttributeByVal,
+			value: ctx.Array(8, ctx.Int(8)),
+			str:   "byval([8 x i8])",
+		},
+		{
+			kind: llvm.AttributeByRef,
+			value: ctx.LiteralStruct(
+				ctx.Pointer(0),
+				ctx.Int(32),
+				ctx.Int(32),
+			),
+			str: "byref({ ptr, i32, i32 })",
+		},
+		{
+			kind:  llvm.AttributeStackReturn,
+			value: ctx.Array(5, ctx.Float32()),
+			str:   "sret([5 x float])",
+		},
+	} {
+		t.Run(c.str, func(t *testing.T) {
+			// Create the attribute.
+			attr := ctx.TypeAttribute(c.kind, c.value)
+
+			// Test stringification.
+			if str := attr.String(); str != c.str {
+				t.Errorf("unexpected string of attribute: %q", str)
+			}
+
+			// Try reading the attribute back.
+			key, isString := attr.Kind()
+			if isString {
+				t.Error("type attribute is string")
+			}
+			if key != string(c.kind) {
+				t.Errorf("unexpected attribute key: %q", key)
+			}
+			if value := attr.TypeValue(); value != c.value {
+				t.Errorf("unexpected attribute value: %q", value)
+			}
+
+			// A duplicate attribute should be equal.
+			if ctx.TypeAttribute(c.kind, c.value) != attr {
+				t.Error("duplicate attribute is not equal")
+			}
+		})
+	}
+}
+
+func TestRangeAttribute(t *testing.T) {
+	if !llvm.SupportsAttributeRange {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	// Create a context to test with.
+	ctx := llvm.CreateContext()
+	defer ctx.Destroy()
+
+	// Create the attribute.
+	attr := ctx.RangeAttribute(
+		llvm.AttributeRange,
+		32,
+		nil,
+		[]uint64{12},
+	)
+
+	// Test stringification.
+	if str := attr.String(); str != "range(i32 0, 12)" {
+		t.Errorf("unexpected string of attribute: %q", str)
+	}
+
+	// Try reading the attribute back.
+	key, isString := attr.Kind()
+	if isString {
+		t.Error("enum attribute is string")
+	}
+	if key != string(llvm.AttributeRange) {
+		t.Errorf("unexpected attribute key: %q", key)
+	}
+	bits, lower, upper := attr.RangeValue()
+	if bits != 32 {
+		t.Errorf("unexpected bit width: %d", bits)
+	}
+	if !slices.Equal(lower, []uint64{0}) {
+		t.Errorf("unexpected lower bound: %v", lower)
+	}
+	if !slices.Equal(upper, []uint64{12}) {
+		t.Errorf("unexpected upper bound: %v", upper)
+	}
+
+	// A duplicate attribute should be equal.
+	if ctx.RangeAttribute(
+		llvm.AttributeRange,
+		32,
+		nil,
+		[]uint64{12},
+	) != attr {
+		t.Error("duplicate attribute is not equal")
+	}
+}
+
+func TestStringAttributeSet(t *testing.T) {
+	t.Parallel()
+
+	// Create a context to test with.
+	ctx := llvm.CreateContext()
+	defer ctx.Destroy()
+
+	// Create simple string attributes.
+	xAttr := ctx.StringAttribute("x", "1")
+	yAttr := ctx.StringAttribute("y", "xyzzy")
+
+	// Combine the attributes into a set.
+	set := ctx.AttributeSet(xAttr, yAttr)
+
+	// Test stringification.
+	if str := set.String(); str != "\"x\"=\"1\" \"y\"=\"xyzzy\"" {
+		t.Errorf("unexpectred string of attribute set: %q", str)
+	}
+
+	// A duplicate set should be equal.
+	if ctx.AttributeSet(xAttr, yAttr) != set {
+		t.Error("duplicate set is not equal")
+	}
+
+	// Reversing the argument order should still produce the same set.
+	if ctx.AttributeSet(yAttr, xAttr) != set {
+		t.Error("element reversal produced a different set")
+	}
+}

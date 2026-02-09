@@ -96,11 +96,6 @@ type SignatureOptions struct {
 	ArgumentAttributes []AttributeSet
 }
 
-// AttributeSet holds a set of options.
-type AttributeSet struct {
-	// TODO: how do we even sanely pass an attribute set????
-}
-
 type Function struct {
 	Global
 }

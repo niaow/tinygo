@@ -11,35 +11,65 @@
 using namespace llvm;
 
 // String conversions
-static inline StringRef toStringRef(LLVMGoStringRef ref) {
+static StringRef toStringRef(LLVMGoStringRef ref) {
 	return StringRef(ref.ptr, ref.len);
 }
-static inline Twine toTwine(LLVMGoStringRef ref) {
+static Twine toTwine(LLVMGoStringRef ref) {
 	return Twine(toStringRef(ref));
 }
-
-// Stringification
+static LLVMGoStringRef fromStringRef(StringRef ref) {
+	return {ref.data(), ref.size()};
+}
 static void LLVMGoConvertString(void* dst, const std::string &src) {
 	goCloneString(dst, {src.data(), src.size()});
 }
-template<typename T>
-static void LLVMGoPrintToString(void* dst, T src) {
-	std::string str;
-	raw_string_ostream stream(str);
-	src->print(stream);
-	LLVMGoConvertString(dst, str);
+
+// Misc conversions
+static APInt makeAPInt(unsigned bits, const uint64_t* data, size_t len) {
+	// A len of 0 is legal from Go's point of view, but not from LLVMs.
+	return len != 0 ? APInt(bits, ArrayRef<uint64_t>(data, len)) : APInt(bits, 0);
 }
-void LLVMGoTypeString(void* dst, LLVMTypeRef src) {
-	LLVMGoPrintToString(dst, unwrap(src));
+
+// Context
+template <typename T>
+struct LLVMGoUniqueRefSet {
+	DenseMap<T, std::unique_ptr<T>> set;
+
+	T* wrap(T value) {
+		// Map the default value to null.
+		if (value == T()) {
+			return nullptr;
+		}
+
+		// Find or create an entry in the map.
+		std::unique_ptr<T> &slot = set[value];
+		if (!slot) {
+			// Populate the new entry.
+			slot.reset(new T(value));
+		}
+
+		return slot.get();
+	}
+};
+struct LLVMGoContext {
+	// A struct can be safely pointer-cast to/from its first field type.
+	// The context must be first.
+	LLVMContext context;
+
+	LLVMGoUniqueRefSet<AttributeSet> attrSetRefs;
+	LLVMGoUniqueRefSet<AttributeList> attrListRefs;
+};
+static LLVMContextRef wrap(LLVMGoContext* ptr) {
+	return reinterpret_cast<LLVMContextRef>(ptr);
 }
-void LLVMGoValueString(void* dst, LLVMValueRef src) {
-	LLVMGoPrintToString(dst, unwrap(src));
+static LLVMGoContext* goUnwrap(LLVMContextRef ref) {
+	return reinterpret_cast<LLVMGoContext*>(ref);
 }
-void LLVMGoModuleString(void* dst, LLVMModuleRef src) {
-	std::string str;
-	raw_string_ostream stream(str);
-	unwrap(src)->print(stream, nullptr);
-	LLVMGoConvertString(dst, str);
+LLVMContextRef LLVMGoContextCreate() {
+	return wrap(new LLVMGoContext());
+}
+void LLVMGoContextDestroy(LLVMContextRef ctx) {
+	delete goUnwrap(ctx);
 }
 
 // Target information
@@ -127,6 +157,254 @@ LLVMModuleRef LLVMGoNewModule(
 }
 LLVMValueRef LLVMGoGetNamedValue(LLVMModuleRef mod, LLVMGoStringRef str) {
 	return wrap(unwrap(mod)->getNamedValue(toStringRef(str)));
+}
+
+// Attributes
+LLVMAttributeRef LLVMGoCreateStringAttribute(
+	LLVMContextRef ctx,
+	LLVMGoStringRef key,
+	LLVMGoStringRef value
+) {
+	return wrap(Attribute::get(
+		*unwrap(ctx),
+		toStringRef(key),
+		toStringRef(value)
+	));
+}
+LLVMAttributeRef LLVMGoCreateEnumAttribute(
+	LLVMContextRef ctx,
+	LLVMGoStringRef kind
+) {
+	auto k = Attribute::getAttrKindFromName(toStringRef(kind));
+	if (!Attribute::isEnumAttrKind(k)) {
+		return nullptr;
+	}
+	return wrap(Attribute::get(*unwrap(ctx), k));
+}
+LLVMAttributeRef LLVMGoCreateIntAttribute(
+	LLVMContextRef ctx,
+	LLVMGoStringRef kind,
+	uint64_t value
+) {
+	auto k = Attribute::getAttrKindFromName(toStringRef(kind));
+	if (!Attribute::isIntAttrKind(k)) {
+		return nullptr;
+	}
+	return wrap(Attribute::get(*unwrap(ctx), k, value));
+}
+LLVMAttributeRef LLVMGoCreateTypeAttribute(
+	LLVMContextRef ctx,
+	LLVMGoStringRef kind,
+	LLVMTypeRef value
+) {
+	auto k = Attribute::getAttrKindFromName(toStringRef(kind));
+	if (!Attribute::isTypeAttrKind(k)) {
+		return nullptr;
+	}
+	return wrap(Attribute::get(*unwrap(ctx), k, unwrap(value)));
+}
+LLVMAttributeRef LLVMGoCreateRangeAttribute(
+	LLVMContextRef ctx,
+	LLVMGoStringRef kind,
+	unsigned bits,
+	uint64_t* lowerData,
+	size_t lowerLen,
+	uint64_t* upperData,
+	size_t upperLen
+) {
+#if LLVM_VERSION_MAJOR >= 19
+	auto k = Attribute::getAttrKindFromName(toStringRef(kind));
+	if (!Attribute::isConstantRangeAttrKind(k)) {
+		return nullptr;
+	}
+	ConstantRange range(
+		makeAPInt(bits, lowerData, lowerLen),
+		makeAPInt(bits, upperData, upperLen)
+	);
+	return wrap(Attribute::get(*unwrap(ctx), k, range));
+#else
+	return nullptr;
+#endif
+}
+bool LLVMGoAttributeKind(LLVMAttributeRef attr, LLVMGoStringRef* kind) {
+	Attribute a = unwrap(attr);
+	if (a.isStringAttribute()) {
+		*kind = fromStringRef(a.getKindAsString());
+		return true;
+	} else {
+		*kind = fromStringRef(Attribute::getNameFromAttrKind(a.getKindAsEnum()));
+		return false;
+	}
+}
+bool LLVMGoAttributeStringValue(LLVMAttributeRef attr, LLVMGoStringRef* dst) {
+	Attribute a = unwrap(attr);
+	if (!a.isStringAttribute()) {
+		return false;
+	}
+	*dst = fromStringRef(a.getValueAsString());
+	return true;
+}
+bool LLVMGoAttributeIntValue(LLVMAttributeRef attr, uint64_t* dst) {
+	Attribute a = unwrap(attr);
+	if (!a.isIntAttribute()) {
+		return false;
+	}
+	*dst = a.getValueAsInt();
+	return true;
+}
+LLVMTypeRef LLVMGoAttributeTypeValue(LLVMAttributeRef attr) {
+	Attribute a = unwrap(attr);
+	return a.isTypeAttribute() ? wrap(a.getValueAsType()) : nullptr;
+}
+LLVMGoConstRange LLVMGoAttributeRangeValue(LLVMAttributeRef attr) {
+#if LLVM_VERSION_MAJOR >= 19
+	Attribute a = unwrap(attr);
+	if (!a.isConstantRangeAttribute()) {
+		return {0, nullptr, nullptr};
+	}
+	const ConstantRange& range = a.getValueAsConstantRange();
+	return {
+		range.getBitWidth(),
+		range.getLower().getRawData(),
+		range.getUpper().getRawData()
+	};
+#else
+	return {0, nullptr, nullptr};
+#endif
+}
+// Attribute sets
+static LLVMGoAttributeSetRef goWrap(LLVMContextRef ctx, AttributeSet set) {
+	return reinterpret_cast<LLVMGoAttributeSetRef>(goUnwrap(ctx)->attrSetRefs.wrap(set));
+}
+static LLVMGoAttributeSetRef makeAttrSetRef(LLVMContextRef ctx, const AttrBuilder &builder) {
+	return goWrap(ctx, AttributeSet::get(*unwrap(ctx), builder));
+}
+static AttributeSet* unwrap(LLVMGoAttributeSetRef ref) {
+	return reinterpret_cast<AttributeSet*>(ref);
+}
+LLVMGoAttributeSetRef LLVMGoAttributeSetCreate(
+	LLVMContextRef ctx,
+	LLVMAttributeRef* attrs,
+	size_t len
+) {
+	AttrBuilder builder(*unwrap(ctx));
+	for (size_t i = 0; i < len; i++) {
+		builder.addAttribute(unwrap(attrs[i]));
+	}
+	return makeAttrSetRef(ctx, builder);
+}
+LLVMGoAttributeSetRef LLVMGoAttributeSetMerge(
+	LLVMContextRef ctx,
+	LLVMGoAttributeSetRef* sets,
+	size_t len
+) {
+	LLVMContext* context = unwrap(ctx);
+	AttrBuilder builder(*context);
+	for (size_t i = 0; i < len; i++) {
+		builder.merge(AttrBuilder(*context, *unwrap(sets[i])));
+	}
+	return makeAttrSetRef(ctx, builder);
+}
+LLVMGoAttributeSetIntersectResult LLVMGoAttributeSetIntersect(
+	LLVMContextRef ctx,
+	LLVMGoAttributeSetRef first,
+	LLVMGoAttributeSetRef* more,
+	size_t len
+) {
+	if (len == 0) {
+		return {first, true};
+	}
+	LLVMContext* context = unwrap(ctx);
+	AttributeSet set = *unwrap(first);
+	for (size_t i = 0; i < len; i++) {
+		std::optional<AttributeSet> intersected = set.intersectWith(*context, *unwrap(more[i]));
+		if (!intersected) {
+			return {nullptr, false};
+		}
+		set = *intersected;
+	}
+	return {goWrap(ctx, set), true};
+}
+#if LLVM_VERSION_MAJOR >= 20
+static const CaptureComponents LLVMGoCaptureLUT[] = {
+	// 0bWRAN, canonicalize invalid
+	[0b0000] = CaptureComponents::None,
+	[0b0001] = CaptureComponents::AddressIsNull,
+	[0b0010] = CaptureComponents::Address, // invalid
+	[0b0011] = CaptureComponents::Address,
+	[0b0100] = CaptureComponents::ReadProvenance,
+	[0b0101] = CaptureComponents::ReadProvenance | CaptureComponents::AddressIsNull,
+	[0b0110] = CaptureComponents::ReadProvenance | CaptureComponents::Address, // invalid
+	[0b0111] = CaptureComponents::ReadProvenance | CaptureComponents::Address,
+	[0b1000] = CaptureComponents::Provenance, // invalid
+	[0b1001] = CaptureComponents::Provenance | CaptureComponents::AddressIsNull, // invalid
+	[0b1010] = CaptureComponents::Provenance | CaptureComponents::Address, // invalid
+	[0b1011] = CaptureComponents::Provenance | CaptureComponents::Address, // invalid
+	[0b1100] = CaptureComponents::Provenance,
+	[0b1101] = CaptureComponents::Provenance | CaptureComponents::AddressIsNull,
+	[0b1110] = CaptureComponents::Provenance | CaptureComponents::Address, // invalid
+	[0b1111] = CaptureComponents::All,
+};
+LLVMGoAttributeSetRef LLVMGoCreateCaptureAttributes(
+	LLVMContextRef ctx,
+	uint8_t other,
+	uint8_t returned
+) {
+	LLVMContext* c = unwrap(ctx);
+	CaptureInfo info(
+		LLVMGoCaptureLUT[other],
+		LLVMGoCaptureLUT[returned]
+	);
+	Attribute attr = Attribute::getWithCaptureInfo(*c, info);
+	return goWrap(ctx, AttributeSet::get(*c, attr));
+}
+static uint8_t LLVMGoConvertCaptureComponents(CaptureComponents components) {
+	uint8_t mask = 0;
+	if (capturesAddress(components)) {
+		if (capturesAddressIsNullOnly(components)) {
+			mask |= LLVMGoCaptureIsNull;
+		} else {
+			mask |= LLVMGoCaptureAddress;
+		}
+	}
+	if (capturesAnyProvenance(components)) {
+		if (capturesReadProvenanceOnly(components)) {
+			mask |= LLVMGoCaptureRead;
+		} else {
+			mask |= LLVMGoCaptureAccess;
+		}
+	}
+	return mask;
+}
+LLVMGoCaptureInfo LLVMGoGetCaptureInfo(LLVMGoAttributeSetRef attrs) {
+	CaptureInfo info = unwrap(attrs)->getCaptureInfo();
+	return {
+		LLVMGoConvertCaptureComponents(info.getOtherComponents()),
+		LLVMGoConvertCaptureComponents(info.getRetComponents())
+	};
+}
+#else
+LLVMGoAttributeSetRef LLVMGoCreateCaptureAttributes(
+	LLVMContextRef ctx,
+	uint8_t other,
+	uint8_t returned
+) {
+	if (other == 0 && returned == 0) {
+		// Create a set with the nocapture attribute.
+		Attribute attr = Attribute::get(*c, Attribute::NoCapture);
+		return goWrap(ctx, AttributeSet::get(*c, attr));
+	}
+	// Conservatively omit any capture-related attributes.
+	return nullptr;
+}
+LLVMGoCaptureInfo LLVMGoGetCaptureInfo(LLVMGoAttributeSetRef attrs) {
+	uint8_t mask = unwrap(attrs)->hasAttribute(Attribute::NoCapture) ? 0 : LLVMGoCaptureAll;
+	return {mask, mask};
+}
+#endif
+// Attribute lists
+static AttributeList* unwrap(LLVMGoAttributeListRef ref) {
+	return reinterpret_cast<AttributeList*>(ref);
 }
 
 // Basic-block manipulation
@@ -1298,12 +1576,7 @@ LLVMValueRef LLVMGoConstInt(
 	const uint64_t* data,
 	size_t len
 ) {
-	if (len == 0) {
-		// A len of 0 is legal from Go's point of view, but not from LLVMs.
-		// Special-case this.
-		return wrap(ConstantInt::get(*unwrap(ctx), APInt(bits, 0)));
-	}
-	return wrap(ConstantInt::get(*unwrap(ctx), APInt(bits, ArrayRef<uint64_t>(data, len))));
+	return wrap(ConstantInt::get(*unwrap(ctx), makeAPInt(bits, data, len)));
 }
 
 LLVMGoIntData LLVMGoAsConstInt(LLVMValueRef value) {
@@ -1451,4 +1724,39 @@ LLVMValueRef LLVMGoCreateFieldPointer(
 		toTwine(name),
 		LLVMGoConvertWrap(mode)
 	));
+}
+
+// Stringification
+template<typename T>
+static void LLVMGoPrintToString(void* dst, T src) {
+	std::string str;
+	raw_string_ostream stream(str);
+	src->print(stream);
+	LLVMGoConvertString(dst, str);
+}
+void LLVMGoTypeString(void* dst, LLVMTypeRef src) {
+	LLVMGoPrintToString(dst, unwrap(src));
+}
+void LLVMGoValueString(void* dst, LLVMValueRef src) {
+	LLVMGoPrintToString(dst, unwrap(src));
+}
+void LLVMGoAttributeString(void* dst, LLVMAttributeRef src) {
+	// The string conversion is entirely different for attributes.
+	std::string str = unwrap(src).getAsString();
+	LLVMGoConvertString(dst, str);
+}
+void LLVMGoAttributeSetString(void* dst, LLVMGoAttributeSetRef src) {
+	// The string conversion is entirely different for attribute sets.
+	std::string str = unwrap(src)->getAsString();
+	LLVMGoConvertString(dst, str);
+}
+void LLVMGoAttributeListString(void* dst, LLVMGoAttributeListRef src) {
+	LLVMGoPrintToString(dst, unwrap(src));
+}
+void LLVMGoModuleString(void* dst, LLVMModuleRef src) {
+	// The string conversion for a module adds the AssemblyAnnotationWriter parameter.
+	std::string str;
+	raw_string_ostream stream(str);
+	unwrap(src)->print(stream, nullptr);
+	LLVMGoConvertString(dst, str);
 }

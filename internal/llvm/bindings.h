@@ -18,10 +18,9 @@ typedef struct {
 // dst is a pointer to a Go string variable.
 void goCloneString(void* dst, LLVMGoStringRef src);
 
-// Stringification
-void LLVMGoTypeString(void* dst, LLVMTypeRef src);
-void LLVMGoValueString(void* dst, LLVMValueRef src);
-void LLVMGoModuleString(void* dst, LLVMModuleRef src);
+// Contexts
+LLVMContextRef LLVMGoContextCreate();
+void LLVMGoContextDestroy(LLVMContextRef ctx);
 
 typedef enum {
 	LLVMGoRelocModelDefault,
@@ -78,6 +77,89 @@ LLVMModuleRef LLVMGoNewModule(
 
 // LLVM's c bindings have an equivalent API, but not until LLVM 20.
 LLVMValueRef LLVMGoGetNamedValue(LLVMModuleRef mod, LLVMGoStringRef str);
+
+// NOTE: LLVMCreateStringAttribute exists, but it uses unsigned int instead of size_t for length.
+// (cont): Use our own function to avoid bizzarre overflow edge-cases.
+LLVMAttributeRef LLVMGoCreateStringAttribute(
+	LLVMContextRef ctx,
+	LLVMGoStringRef key,
+	LLVMGoStringRef value
+);
+// NOTE: The C API accepts an attribute kind ID when creating a non-string attribute.
+// (cont): It is easier to perform the string to ID conversion when creating the attribute.
+// (cont): This completely avoids the issue of exposing attribute IDs.
+LLVMAttributeRef LLVMGoCreateEnumAttribute(
+	LLVMContextRef ctx,
+	LLVMGoStringRef kind
+);
+LLVMAttributeRef LLVMGoCreateIntAttribute(
+	LLVMContextRef ctx,
+	LLVMGoStringRef kind,
+	uint64_t value
+);
+LLVMAttributeRef LLVMGoCreateTypeAttribute(
+	LLVMContextRef ctx,
+	LLVMGoStringRef kind,
+	LLVMTypeRef value
+);
+LLVMAttributeRef LLVMGoCreateRangeAttribute(
+	LLVMContextRef ctx,
+	LLVMGoStringRef kind,
+	unsigned bits,
+	uint64_t* lowerData,
+	size_t lowerLen,
+	uint64_t* upperData,
+	size_t upperLen
+);
+bool LLVMGoAttributeKind(LLVMAttributeRef attr, LLVMGoStringRef* key);
+bool LLVMGoAttributeStringValue(LLVMAttributeRef attr, LLVMGoStringRef* dst);
+bool LLVMGoAttributeIntValue(LLVMAttributeRef attr, uint64_t* dst);
+LLVMTypeRef LLVMGoAttributeTypeValue(LLVMAttributeRef attr);
+typedef struct {
+	uint32_t bits;
+	const uint64_t* lower;
+	const uint64_t* upper;
+} LLVMGoConstRange;
+LLVMGoConstRange LLVMGoAttributeRangeValue(LLVMAttributeRef attr);
+// Attribute sets cannot be passed directly.
+// The context instead owns opaque pointers.
+typedef struct LLVMGoOpaqueAttributeSet *LLVMGoAttributeSetRef;
+typedef struct LLVMGoOpaqueAttributeList *LLVMGoAttributeListRef;
+LLVMGoAttributeSetRef LLVMGoAttributeSetCreate(
+	LLVMContextRef ctx,
+	LLVMAttributeRef* attrs,
+	size_t len
+);
+LLVMGoAttributeSetRef LLVMGoAttributeSetMerge(
+	LLVMContextRef ctx,
+	LLVMGoAttributeSetRef* sets,
+	size_t len
+);
+typedef struct {
+	LLVMGoAttributeSetRef result;
+	bool ok;
+} LLVMGoAttributeSetIntersectResult;
+LLVMGoAttributeSetIntersectResult LLVMGoAttributeSetIntersect(
+	LLVMContextRef ctx,
+	LLVMGoAttributeSetRef first,
+	LLVMGoAttributeSetRef* more,
+	size_t len
+);
+#define LLVMGoCaptureIsNull (1 << 0)
+#define LLVMGoCaptureAddress ((1 << 1) | LLVMGoCaptureIsNull)
+#define LLVMGoCaptureRead (1 << 2)
+#define LLVMGoCaptureAccess ((1 << 3) | LLVMGoCaptureRead)
+#define LLVMGoCaptureAll (LLVMGoCaptureAddress | LLVMGoCaptureAccess)
+LLVMGoAttributeSetRef LLVMGoCreateCaptureAttributes(
+	LLVMContextRef ctx,
+	uint8_t other,
+	uint8_t returned
+);
+typedef struct {
+	uint8_t other;
+	uint8_t returned;
+} LLVMGoCaptureInfo;
+LLVMGoCaptureInfo LLVMGoGetCaptureInfo(LLVMGoAttributeSetRef attrs);
 
 LLVMBasicBlockRef LLVMGoAppendBasicBlock(LLVMValueRef fn, LLVMGoStringRef name);
 
@@ -740,6 +822,14 @@ LLVMValueRef LLVMGoCreateFieldPointer(
 	LLVMGoGEPMode mode,
 	LLVMGoStringRef name
 );
+
+// Stringification
+void LLVMGoTypeString(void* dst, LLVMTypeRef src);
+void LLVMGoValueString(void* dst, LLVMValueRef src);
+void LLVMGoAttributeString(void* dst, LLVMAttributeRef src);
+void LLVMGoAttributeSetString(void* dst, LLVMGoAttributeSetRef src);
+void LLVMGoAttributeListString(void* dst, LLVMGoAttributeListRef src);
+void LLVMGoModuleString(void* dst, LLVMModuleRef src);
 
 #ifdef __cplusplus
 }
