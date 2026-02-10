@@ -364,30 +364,56 @@ func (ctx Context) IntersectAttributeSets(first AttributeSet, more ...AttributeS
 
 // CaptureAttributes creates an attribute set with the provided constraints.
 func (ctx Context) CaptureAttributes(info CaptureInfo) AttributeSet {
-	// LLVM 20 switches to the new API
-	return AttributeSet{C.LLVMGoCreateCaptureAttributes(
-		ctx.ptr,
-		C.uint8_t(info.Other),
-		C.uint8_t(info.Return),
-	)}
+	return AttributeSet{C.LLVMGoCreateCaptureAttributes(ctx.ptr, info.toC())}
 }
 
+// CaptureInfo inspects capture-related attributes from a set.
 func (set AttributeSet) CaptureInfo() CaptureInfo {
-	panic("TODO")
+	return captureInfoFromC(C.LLVMGoGetCaptureInfo(set.ptr))
 }
 
+// CaptureInfo holds information on how a function argument may capture pointers.
 type CaptureInfo struct {
-	Other  CaptureFlags
-	Return CaptureFlags
+	// Other indicates how the argument may be captured through means other than the return.
+	Other CaptureComponents
+
+	// Return indicates how the argument may be captured through the function's return.
+	Return CaptureComponents
 }
 
-type CaptureFlags uint8
+func captureInfoFromC(info C.LLVMGoCaptureInfo) CaptureInfo {
+	return CaptureInfo{
+		Other:  captureComponentsFromC(info.other),
+		Return: captureComponentsFromC(info.returned),
+	}
+}
 
-const (
-	CaptureNone    CaptureFlags = 0
-	CaptureIsNull  CaptureFlags = 1 << 0
-	CaptureAddress CaptureFlags = (1 << 1) | CaptureIsNull
-	CaptureRead    CaptureFlags = 1 << 2
-	CaptureAccess  CaptureFlags = (1 << 3) | CaptureRead
-	CaptureFull                 = CaptureAddress | CaptureAccess
-)
+func (info CaptureInfo) toC() C.LLVMGoCaptureInfo {
+	return C.LLVMGoCaptureInfo{
+		other:    info.Other.toC(),
+		returned: info.Return.toC(),
+	}
+}
+
+type CaptureComponents struct {
+	Address    AddressCapture
+	Provenance ProvenanceCapture
+}
+
+func captureComponentsFromC(info C.LLVMGoCaptureComponents) CaptureComponents {
+	return CaptureComponents{
+		Address:    AddressCapture(info.address),
+		Provenance: ProvenanceCapture(info.provenance),
+	}
+}
+
+func (components CaptureComponents) toC() C.LLVMGoCaptureComponents {
+	return C.LLVMGoCaptureComponents{
+		address:    C.LLVMGoCaptureAddress(components.Address),
+		provenance: C.LLVMGoCaptureProvenance(components.Provenance),
+	}
+}
+
+type AddressCapture C.LLVMGoCaptureAddress
+
+type ProvenanceCapture C.LLVMGoCaptureProvenance

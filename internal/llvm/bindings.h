@@ -145,20 +145,25 @@ LLVMGoAttributeSetIntersectResult LLVMGoAttributeSetIntersect(
 	LLVMGoAttributeSetRef* more,
 	size_t len
 );
-#define LLVMGoCaptureIsNull (1 << 0)
-#define LLVMGoCaptureAddress ((1 << 1) | LLVMGoCaptureIsNull)
-#define LLVMGoCaptureRead (1 << 2)
-#define LLVMGoCaptureAccess ((1 << 3) | LLVMGoCaptureRead)
-#define LLVMGoCaptureAll (LLVMGoCaptureAddress | LLVMGoCaptureAccess)
-LLVMGoAttributeSetRef LLVMGoCreateCaptureAttributes(
-	LLVMContextRef ctx,
-	uint8_t other,
-	uint8_t returned
-);
+typedef enum {
+	LLVMGoCaptureAddressFull,
+	LLVMGoCaptureAddressIsNull,
+	LLVMGoCaptureAddressNone,
+} LLVMGoCaptureAddress;
+typedef enum {
+	LLVMGoCaptureProvenanceFull,
+	LLVMGoCaptureProvenanceReadOnly,
+	LLVMGoCaptureProvenanceNone,
+} LLVMGoCaptureProvenance;
 typedef struct {
-	uint8_t other;
-	uint8_t returned;
+	LLVMGoCaptureAddress address;
+	LLVMGoCaptureProvenance provenance;
+} LLVMGoCaptureComponents;
+typedef struct {
+	LLVMGoCaptureComponents other;
+	LLVMGoCaptureComponents returned;
 } LLVMGoCaptureInfo;
+LLVMGoAttributeSetRef LLVMGoCreateCaptureAttributes(LLVMContextRef ctx, LLVMGoCaptureInfo info);
 LLVMGoCaptureInfo LLVMGoGetCaptureInfo(LLVMGoAttributeSetRef attrs);
 
 LLVMBasicBlockRef LLVMGoAppendBasicBlock(LLVMValueRef fn, LLVMGoStringRef name);

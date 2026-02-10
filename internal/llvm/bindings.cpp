@@ -326,70 +326,55 @@ LLVMGoAttributeSetIntersectResult LLVMGoAttributeSetIntersect(
 	return {goWrap(ctx, set), true};
 }
 #if LLVM_VERSION_MAJOR >= 20
-static const CaptureComponents LLVMGoCaptureLUT[] = {
-	// 0bWRAN, canonicalize invalid
-	[0b0000] = CaptureComponents::None,
-	[0b0001] = CaptureComponents::AddressIsNull,
-	[0b0010] = CaptureComponents::Address, // invalid
-	[0b0011] = CaptureComponents::Address,
-	[0b0100] = CaptureComponents::ReadProvenance,
-	[0b0101] = CaptureComponents::ReadProvenance | CaptureComponents::AddressIsNull,
-	[0b0110] = CaptureComponents::ReadProvenance | CaptureComponents::Address, // invalid
-	[0b0111] = CaptureComponents::ReadProvenance | CaptureComponents::Address,
-	[0b1000] = CaptureComponents::Provenance, // invalid
-	[0b1001] = CaptureComponents::Provenance | CaptureComponents::AddressIsNull, // invalid
-	[0b1010] = CaptureComponents::Provenance | CaptureComponents::Address, // invalid
-	[0b1011] = CaptureComponents::Provenance | CaptureComponents::Address, // invalid
-	[0b1100] = CaptureComponents::Provenance,
-	[0b1101] = CaptureComponents::Provenance | CaptureComponents::AddressIsNull,
-	[0b1110] = CaptureComponents::Provenance | CaptureComponents::Address, // invalid
-	[0b1111] = CaptureComponents::All,
+static const CaptureComponents LLVMGoCaptureAddressLUT[] = {
+	[LLVMGoCaptureAddressFull] = CaptureComponents::Address,
+	[LLVMGoCaptureAddressIsNull] = CaptureComponents::AddressIsNull,
+	[LLVMGoCaptureAddressNone] = CaptureComponents::None,
 };
-LLVMGoAttributeSetRef LLVMGoCreateCaptureAttributes(
-	LLVMContextRef ctx,
-	uint8_t other,
-	uint8_t returned
-) {
+static const CaptureComponents LLVMGoCaptureProvenanceLUT[] = {
+	[LLVMGoCaptureProvenanceFull] = CaptureComponents::Provenance,
+	[LLVMGoCaptureProvenanceReadOnly] = CaptureComponents::ReadProvenance,
+	[LLVMGoCaptureProvenanceNone] = CaptureComponents::None,
+};
+static CaptureComponents unwrap(LLVMGoCaptureComponents components) {
+	return
+		LLVMGoCaptureAddressLUT[components.address] |
+		LLVMGoCaptureProvenanceLUT[components.provenance];
+}
+LLVMGoAttributeSetRef LLVMGoCreateCaptureAttributes(LLVMContextRef ctx, LLVMGoCaptureInfo info) {
 	LLVMContext* c = unwrap(ctx);
-	CaptureInfo info(
-		LLVMGoCaptureLUT[other],
-		LLVMGoCaptureLUT[returned]
-	);
-	Attribute attr = Attribute::getWithCaptureInfo(*c, info);
+	Attribute attr = Attribute::getWithCaptureInfo(*c, CaptureInfo(unwrap(info.other), unwrap(info.returned)));
 	return goWrap(ctx, AttributeSet::get(*c, attr));
 }
-static uint8_t LLVMGoConvertCaptureComponents(CaptureComponents components) {
-	uint8_t mask = 0;
-	if (capturesAddress(components)) {
-		if (capturesAddressIsNullOnly(components)) {
-			mask |= LLVMGoCaptureIsNull;
-		} else {
-			mask |= LLVMGoCaptureAddress;
-		}
-	}
-	if (capturesAnyProvenance(components)) {
-		if (capturesReadProvenanceOnly(components)) {
-			mask |= LLVMGoCaptureRead;
-		} else {
-			mask |= LLVMGoCaptureAccess;
-		}
-	}
-	return mask;
+static LLVMGoCaptureComponents goWrap(CaptureComponents components) {
+	return {
+		.address = capturesAddress(components)
+			? capturesAddressIsNullOnly(components)
+				? LLVMGoCaptureAddressIsNull
+				: LLVMGoCaptureAddressFull
+			: LLVMGoCaptureAddressNone,
+		.provenance = capturesAnyProvenance(components)
+			? capturesReadProvenanceOnly(components)
+				? LLVMGoCaptureProvenanceReadOnly
+				: LLVMGoCaptureProvenanceFull
+			: LLVMGoCaptureProvenanceNone,
+	};
 }
 LLVMGoCaptureInfo LLVMGoGetCaptureInfo(LLVMGoAttributeSetRef attrs) {
 	CaptureInfo info = unwrap(attrs)->getCaptureInfo();
 	return {
-		LLVMGoConvertCaptureComponents(info.getOtherComponents()),
-		LLVMGoConvertCaptureComponents(info.getRetComponents())
+		.other = goWrap(info.getOtherComponents()),
+		.returned = goWrap(info.getRetComponents()),
 	};
 }
 #else
-LLVMGoAttributeSetRef LLVMGoCreateCaptureAttributes(
-	LLVMContextRef ctx,
-	uint8_t other,
-	uint8_t returned
-) {
-	if (other == 0 && returned == 0) {
+LLVMGoAttributeSetRef LLVMGoCreateCaptureAttributes(LLVMContextRef ctx, LLVMGoCaptureInfo info) {
+	if (
+		info.other.address == LLVMGoCaptureAddressNone &&
+		info.other.provenance == LLVMGoCaptureProvenanceNone &&
+		info.returned.address == LLVMGoCaptureAddressNone &&
+		info.returned.provenance == LLVMGoCaptureProvenanceNone
+	) {
 		// Create a set with the nocapture attribute.
 		Attribute attr = Attribute::get(*c, Attribute::NoCapture);
 		return goWrap(ctx, AttributeSet::get(*c, attr));
@@ -398,8 +383,19 @@ LLVMGoAttributeSetRef LLVMGoCreateCaptureAttributes(
 	return nullptr;
 }
 LLVMGoCaptureInfo LLVMGoGetCaptureInfo(LLVMGoAttributeSetRef attrs) {
-	uint8_t mask = unwrap(attrs)->hasAttribute(Attribute::NoCapture) ? 0 : LLVMGoCaptureAll;
-	return {mask, mask};
+	CaptureComponents components = unwrap(attrs)->hasAttribute(Attribute::NoCapture)
+		? {
+			.address = LLVMGoCaptureAddressNone,
+			.provenance = LLVMGoCaptureProvenanceNone,
+		}
+		: {
+			.address = LLVMGoCaptureAddressFull,
+			.provenance = LLVMGoCaptureProvenanceFull,
+		};
+	return {
+		.other = components,
+		.returned = components,
+	};
 }
 #endif
 // Attribute lists
