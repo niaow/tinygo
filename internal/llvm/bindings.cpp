@@ -94,10 +94,7 @@ LLVMTargetMachineRef LLVMGoCreateTargetMachine(
 	LLVMGoTargetMachineConfig config,
 	void* errMsgDst
 ) {
-	// Create a triple from the string.
-	// NOTE: Older LLVM versions lack the StringRef constructor.
-	// (cont): The Twine constructor is portable.
-	auto triple = Triple(toTwine(config.triple));
+	StringRef triple = toStringRef(config.triple);
 
 	// Check if the triple is supported.
 	// TODO: is there a less cursed way to do this?
@@ -115,7 +112,11 @@ LLVMTargetMachineRef LLVMGoCreateTargetMachine(
 
 	// Create the target machine.
 	return reinterpret_cast<LLVMTargetMachineRef>(target->createTargetMachine(
+#if LLVM_VERSION_MAJOR >= 21
+		Triple(triple),
+#else
 		triple,
+#endif
 		toStringRef(config.cpu),
 		toStringRef(config.features),
 		options,
@@ -151,7 +152,11 @@ LLVMModuleRef LLVMGoNewModule(
 	LLVMTargetDataRef dataLayout
 ) {
 	auto mod = new Module(toStringRef(name), *unwrap(ctx));
+#if LLVM_VERSION_MAJOR >= 21
 	mod->setTargetTriple(Triple(toTwine(triple)));
+#else
+	mod->setTargetTriple(toStringRef(triple));
+#endif
 	mod->setDataLayout(*unwrap(dataLayout));
 	return wrap(mod);
 }
@@ -344,18 +349,28 @@ static CaptureComponents unwrap(LLVMGoCaptureComponents components) {
 }
 LLVMGoAttributeSetRef LLVMGoCreateCaptureAttributes(LLVMContextRef ctx, LLVMGoCaptureInfo info) {
 	LLVMContext* c = unwrap(ctx);
-	Attribute attr = Attribute::getWithCaptureInfo(*c, CaptureInfo(unwrap(info.other), unwrap(info.returned)));
+	CaptureInfo ci(unwrap(info.other), unwrap(info.returned));
+#if LLVM_VERSION_MAJOR >= 21
+	Attribute attr = Attribute::getWithCaptureInfo(*c, ci);
+#else
+	// LLVM 20 added a constructor through AttrBuilder but not a normal constructor. 
+	// Construct it manually.
+	Attribute attr = Attribute::get(*c, Attribute::Captures, ci.toIntValue());
+#endif
 	return goWrap(ctx, AttributeSet::get(*c, attr));
 }
 static LLVMGoCaptureComponents goWrap(CaptureComponents components) {
+	// TODO: use the captures* check functions once we drop LLVM 20 support
+	CaptureComponents address = components & CaptureComponents::Address;
+	CaptureComponents provenance = components & CaptureComponents::Provenance;
 	return {
-		.address = capturesAddress(components)
-			? capturesAddressIsNullOnly(components)
+		.address = address != CaptureComponents::None
+			? address == CaptureComponents::AddressIsNull
 				? LLVMGoCaptureAddressIsNull
 				: LLVMGoCaptureAddressFull
 			: LLVMGoCaptureAddressNone,
-		.provenance = capturesAnyProvenance(components)
-			? capturesReadProvenanceOnly(components)
+		.provenance = provenance != CaptureComponents::None
+			? provenance == CaptureComponents::ReadProvenance
 				? LLVMGoCaptureProvenanceReadOnly
 				: LLVMGoCaptureProvenanceFull
 			: LLVMGoCaptureProvenanceNone,
@@ -711,8 +726,14 @@ LLVMValueRef LLVMGoCreateOr(
 	return wrap(unwrap(builder)->CreateOr(
 		unwrap(x),
 		unwrap(y),
-		toTwine(name),
-		disjoint
+		toTwine(name)
+#if LLVM_VERSION_MAJOR >= 21
+		, disjoint
+#else
+		// The disjoint flag is not exposed through the CreateOr function until LLVM 21.
+		// It is possible to create a disjoint or directly, but not with the folder.
+		// Just drop the flag for now.
+#endif
 	));
 }
 LLVMValueRef LLVMGoCreateXOr(
@@ -765,9 +786,11 @@ static LLVMValueRef LLVMGoCreateBitScanIntrinsic(
 	Intrinsic::ID intrinsic
 ) {
 	auto b = unwrap(builder);
+	Value* srcVal = unwrap(src);
 	return wrap(b->CreateIntrinsic(
 		intrinsic,
-		{unwrap(src), b->getInt1(nonZero)},
+		unwrap(src)->getType(),
+		{srcVal, b->getInt1(nonZero)},
 		{},
 		toTwine(name)
 	));
@@ -795,9 +818,11 @@ LLVMValueRef LLVMGoCreateFShl(
 	LLVMValueRef by,
 	LLVMGoStringRef name
 ) {
+	Value* highVal = unwrap(high);
 	return wrap(unwrap(builder)->CreateIntrinsic(
 		Intrinsic::fshl,
-		{unwrap(high), unwrap(low), unwrap(by)},
+		highVal->getType(),
+		{highVal, unwrap(low), unwrap(by)},
 		{},
 		toTwine(name)
 	));
@@ -1258,6 +1283,8 @@ static const AtomicRMWInst::BinOp LLVMGoAtomicRMWOpTable[] = {
 #if LLVM_VERSION_MAJOR >= 20
 	[LLVMGoAtomicRMWOpUSubCond] = AtomicRMWInst::USubCond,
 	[LLVMGoAtomicRMWOpUSubSat] = AtomicRMWInst::USubSat,
+#endif
+#if LLVM_VERSION_MAJOR >= 21
 	[LLVMGoAtomicRMWOpFMaximum] = AtomicRMWInst::FMaximum,
 	[LLVMGoAtomicRMWOpFMinimum] = AtomicRMWInst::FMinimum,
 #endif

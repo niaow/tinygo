@@ -566,11 +566,14 @@ typedef enum {
 	// LLVM 20
 	LLVMGoAtomicRMWOpUSubCond,
 	LLVMGoAtomicRMWOpUSubSat,
+	// LLVM 21
 	LLVMGoAtomicRMWOpFMaximum,
-	LLVMGoAtomicRMWOpFMinimum
+	LLVMGoAtomicRMWOpFMinimum,
 } LLVMGoAtomicRMWOp;
-#if LLVM_VERSION_MAJOR >= 20
+#if LLVM_VERSION_MAJOR >= 21
 #define LLVMGoAtomicRMWOpSupported LLVMGoAtomicRMWOpFMinimum
+#elif LLVM_VERSION_MAJOR >= 20
+#define LLVMGoAtomicRMWOpSupported LLVMGoAtomicRMWOpUSubSat
 #elif LLVM_VERSION_MAJOR >= 16
 #define LLVMGoAtomicRMWOpSupported LLVMGoAtomicRMWOpUDecWrap
 #else
