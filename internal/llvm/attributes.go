@@ -364,6 +364,10 @@ func (ctx Context) IntersectAttributeSets(first AttributeSet, more ...AttributeS
 
 // CaptureAttributes creates an attribute set with the provided constraints.
 func (ctx Context) CaptureAttributes(info CaptureInfo) AttributeSet {
+	if info == (CaptureInfo{}) {
+		// This is the default capture info.
+		return AttributeSet{}
+	}
 	return AttributeSet{C.LLVMGoCreateCaptureAttributes(ctx.ptr, info.toC())}
 }
 
@@ -381,6 +385,18 @@ type CaptureInfo struct {
 	Return CaptureComponents
 }
 
+// String formats the capture info as it would be printed in IR.
+func (info CaptureInfo) String() string {
+	switch {
+	case info.Return == info.Other:
+		return info.Other.String()
+	case info.Other.Address == AddressCaptureNone && info.Other.Provenance == ProvenanceCaptureNone:
+		return "ret: " + info.Return.String()
+	default:
+		return info.Other.String() + ", ret: " + info.Return.String()
+	}
+}
+
 func captureInfoFromC(info C.LLVMGoCaptureInfo) CaptureInfo {
 	return CaptureInfo{
 		Other:  captureComponentsFromC(info.other),
@@ -395,9 +411,25 @@ func (info CaptureInfo) toC() C.LLVMGoCaptureInfo {
 	}
 }
 
+// CaptureComponents holds capture information for a single scope.
 type CaptureComponents struct {
-	Address    AddressCapture
+	// Address specifies how the address identity will be captured.
+	Address AddressCapture
+
+	// Provenance specifies how the pointer will be captured for future access.
 	Provenance ProvenanceCapture
+}
+
+// String formats the capture components as they would be printed in IR.
+func (components CaptureComponents) String() string {
+	switch {
+	case components.Address == AddressCaptureNone:
+		return components.Provenance.String()
+	case components.Provenance == ProvenanceCaptureNone:
+		return components.Address.String()
+	default:
+		return components.Address.String() + ", " + components.Provenance.String()
+	}
 }
 
 func captureComponentsFromC(info C.LLVMGoCaptureComponents) CaptureComponents {
@@ -414,6 +446,54 @@ func (components CaptureComponents) toC() C.LLVMGoCaptureComponents {
 	}
 }
 
+// AddressCapture specifies how a function will capture the identity of an argument.
 type AddressCapture C.LLVMGoCaptureAddress
 
+const (
+	// AddressCaptureFull captures the identity of the pointer.
+	// This is the default AddressCapture.
+	AddressCaptureFull AddressCapture = C.LLVMGoCaptureAddressFull
+
+	// AddressCaptureIsNull captures whether the pointer is null.
+	AddressCaptureIsNull AddressCapture = C.LLVMGoCaptureAddressIsNull
+
+	// AddressCaptureNone does not capture the identity of the pointer.
+	AddressCaptureNone AddressCapture = C.LLVMGoCaptureAddressNone
+)
+
+// String formats the AddressCapture as it would be printed in IR.
+func (ac AddressCapture) String() string {
+	return addressCaptureNames[ac]
+}
+
+var addressCaptureNames = [...]string{
+	AddressCaptureFull:   "address",
+	AddressCaptureIsNull: "address_is_null",
+	AddressCaptureNone:   "none",
+}
+
+// ProvenanceCapture specifies how memory may be accessed from an argument after the callee returns.
 type ProvenanceCapture C.LLVMGoCaptureProvenance
+
+const (
+	// ProvenanceCaptureFull captures the pointer such that it may be read from or written to after the callee returns.
+	// This is the default ProvenanceCapture.
+	ProvenanceCaptureFull ProvenanceCapture = C.LLVMGoCaptureProvenanceFull
+
+	// ProvenanceCaptureFull captures the pointer such that it may be read from after the callee returns.
+	ProvenanceCaptureReadOnly ProvenanceCapture = C.LLVMGoCaptureProvenanceReadOnly
+
+	// ProvenanceCapture indicates that the pointer will not be accessed after the callee returns.
+	ProvenanceCaptureNone ProvenanceCapture = C.LLVMGoCaptureProvenanceNone
+)
+
+// String formats the ProvenanceCapture as it would be printed in IR.
+func (pc ProvenanceCapture) String() string {
+	return provenanceCaptureNames[pc]
+}
+
+var provenanceCaptureNames = [...]string{
+	ProvenanceCaptureFull:     "provenance",
+	ProvenanceCaptureReadOnly: "read_provenance",
+	ProvenanceCaptureNone:     "none",
+}

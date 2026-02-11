@@ -54,3 +54,5 @@ func refAsBytes(ref C.LLVMGoStringRef) []byte {
 		ref.len,
 	)
 }
+
+const VersionMajor = C.LLVM_VERSION_MAJOR

@@ -298,3 +298,117 @@ func TestStringAttributeSet(t *testing.T) {
 		t.Error("element reversal produced a different set")
 	}
 }
+
+func TestCaptureAttributes(t *testing.T) {
+	if llvm.VersionMajor < 20 {
+		t.Skip("captures(...) requires LLVM 20 or newer")
+	}
+
+	t.Parallel()
+
+	for _, c := range []struct {
+		info       llvm.CaptureInfo
+		str        string
+		infoString string
+	}{
+		{
+			info:       llvm.CaptureInfo{},
+			str:        "",
+			infoString: "address, provenance",
+		},
+		{
+			info: llvm.CaptureInfo{
+				Other: llvm.CaptureComponents{
+					Address:    llvm.AddressCaptureNone,
+					Provenance: llvm.ProvenanceCaptureNone,
+				},
+			},
+			str:        "captures(ret: address, provenance)",
+			infoString: "ret: address, provenance",
+		},
+		{
+			info: llvm.CaptureInfo{
+				Other: llvm.CaptureComponents{
+					Address:    llvm.AddressCaptureIsNull,
+					Provenance: llvm.ProvenanceCaptureNone,
+				},
+				Return: llvm.CaptureComponents{
+					Address: llvm.AddressCaptureNone,
+				},
+			},
+			str:        "captures(address_is_null, ret: provenance)",
+			infoString: "address_is_null, ret: provenance",
+		},
+	} {
+		c := c
+		t.Run(c.infoString, func(t *testing.T) {
+			t.Parallel()
+
+			// Create a context to test with.
+			ctx := llvm.CreateContext()
+			defer ctx.Destroy()
+
+			// Create the attribute set.
+			set := ctx.CaptureAttributes(c.info)
+
+			// Test stringification.
+			if str := set.String(); str != c.str {
+				t.Errorf("unexpected string of set: %q", str)
+			}
+
+			// Try reading the info back.
+			if info := set.CaptureInfo(); info != c.info {
+				t.Errorf("unexpected capture info: %s", info)
+			}
+
+			// Test stringification of the raw info.
+			if str := c.info.String(); str != c.infoString {
+				t.Errorf("unexpected string of info: %q", str)
+			}
+		})
+	}
+}
+
+func TestLegacyNoCapture(t *testing.T) {
+	// TODO: remove this test when we drop LLVM 19 support.
+	if llvm.VersionMajor >= 20 {
+		t.Skip("nocapture removed by LLVM 20 in favor of captures(...)")
+	}
+
+	t.Parallel()
+
+	// Create a context to test with.
+	ctx := llvm.CreateContext()
+	defer ctx.Destroy()
+
+	// Create a simple set with the nocapture attribute.
+	noCaptureSet := ctx.AttributeSet(ctx.EnumAttribute("nocapture"))
+
+	// Ensure that CaptureAttributes creates the same set.
+	noCaptureComponents := llvm.CaptureComponents{
+		Address:    llvm.AddressCaptureNone,
+		Provenance: llvm.ProvenanceCaptureNone,
+	}
+	noCaptureInfo := llvm.CaptureInfo{
+		Other:  noCaptureComponents,
+		Return: noCaptureComponents,
+	}
+	if set := ctx.CaptureAttributes(noCaptureInfo); set != noCaptureSet {
+		t.Errorf("expected attr set %q but got %q", noCaptureSet, set)
+	}
+
+	// Ensure that CaptureAttributes creates an empty set if something is captured.
+	if set := ctx.CaptureAttributes(llvm.CaptureInfo{}); set != (llvm.AttributeSet{}) {
+		t.Errorf("expected empty set from partial capture but got %q", set)
+	}
+
+	// Test reading back the info from the noCaptureSet.
+	if info := noCaptureSet.CaptureInfo(); info != noCaptureInfo {
+		t.Errorf("unexpected info from nocapture: %q", info)
+	}
+
+	// Test info from an empty set.
+	if info := (llvm.AttributeSet{}).CaptureInfo(); info != noCaptureInfo {
+		t.Errorf("unexpected info from empty set: %q", info)
+	}
+}

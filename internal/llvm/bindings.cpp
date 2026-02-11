@@ -279,8 +279,9 @@ static LLVMGoAttributeSetRef goWrap(LLVMContextRef ctx, AttributeSet set) {
 static LLVMGoAttributeSetRef makeAttrSetRef(LLVMContextRef ctx, const AttrBuilder &builder) {
 	return goWrap(ctx, AttributeSet::get(*unwrap(ctx), builder));
 }
-static AttributeSet* unwrap(LLVMGoAttributeSetRef ref) {
-	return reinterpret_cast<AttributeSet*>(ref);
+static AttributeSet unwrap(LLVMGoAttributeSetRef ref) {
+	auto ptr = reinterpret_cast<AttributeSet*>(ref);
+	return ptr != nullptr ? *ptr : AttributeSet();
 }
 LLVMGoAttributeSetRef LLVMGoAttributeSetCreate(
 	LLVMContextRef ctx,
@@ -301,7 +302,7 @@ LLVMGoAttributeSetRef LLVMGoAttributeSetMerge(
 	LLVMContext* context = unwrap(ctx);
 	AttrBuilder builder(*context);
 	for (size_t i = 0; i < len; i++) {
-		builder.merge(AttrBuilder(*context, *unwrap(sets[i])));
+		builder.merge(AttrBuilder(*context, unwrap(sets[i])));
 	}
 	return makeAttrSetRef(ctx, builder);
 }
@@ -315,9 +316,9 @@ LLVMGoAttributeSetIntersectResult LLVMGoAttributeSetIntersect(
 		return {first, true};
 	}
 	LLVMContext* context = unwrap(ctx);
-	AttributeSet set = *unwrap(first);
+	AttributeSet set = unwrap(first);
 	for (size_t i = 0; i < len; i++) {
-		std::optional<AttributeSet> intersected = set.intersectWith(*context, *unwrap(more[i]));
+		std::optional<AttributeSet> intersected = set.intersectWith(*context, unwrap(more[i]));
 		if (!intersected) {
 			return {nullptr, false};
 		}
@@ -361,7 +362,7 @@ static LLVMGoCaptureComponents goWrap(CaptureComponents components) {
 	};
 }
 LLVMGoCaptureInfo LLVMGoGetCaptureInfo(LLVMGoAttributeSetRef attrs) {
-	CaptureInfo info = unwrap(attrs)->getCaptureInfo();
+	CaptureInfo info = unwrap(attrs).getCaptureInfo();
 	return {
 		.other = goWrap(info.getOtherComponents()),
 		.returned = goWrap(info.getRetComponents()),
@@ -383,7 +384,7 @@ LLVMGoAttributeSetRef LLVMGoCreateCaptureAttributes(LLVMContextRef ctx, LLVMGoCa
 	return nullptr;
 }
 LLVMGoCaptureInfo LLVMGoGetCaptureInfo(LLVMGoAttributeSetRef attrs) {
-	CaptureComponents components = unwrap(attrs)->hasAttribute(Attribute::NoCapture)
+	CaptureComponents components = unwrap(attrs).hasAttribute(Attribute::NoCapture)
 		? {
 			.address = LLVMGoCaptureAddressNone,
 			.provenance = LLVMGoCaptureProvenanceNone,
@@ -1743,7 +1744,7 @@ void LLVMGoAttributeString(void* dst, LLVMAttributeRef src) {
 }
 void LLVMGoAttributeSetString(void* dst, LLVMGoAttributeSetRef src) {
 	// The string conversion is entirely different for attribute sets.
-	std::string str = unwrap(src)->getAsString();
+	std::string str = unwrap(src).getAsString();
 	LLVMGoConvertString(dst, str);
 }
 void LLVMGoAttributeListString(void* dst, LLVMGoAttributeListRef src) {
