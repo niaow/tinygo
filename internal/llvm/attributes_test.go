@@ -227,12 +227,7 @@ func TestRangeAttribute(t *testing.T) {
 	defer ctx.Destroy()
 
 	// Create the attribute.
-	attr := ctx.RangeAttribute(
-		llvm.AttributeRange,
-		32,
-		nil,
-		[]uint64{12},
-	)
+	attr := ctx.RangeAttribute(llvm.AttributeRange, 32, nil, []uint64{12})
 
 	// Test stringification.
 	if str := attr.String(); str != "range(i32 0, 12)" {
@@ -259,12 +254,7 @@ func TestRangeAttribute(t *testing.T) {
 	}
 
 	// A duplicate attribute should be equal.
-	if ctx.RangeAttribute(
-		llvm.AttributeRange,
-		32,
-		nil,
-		[]uint64{12},
-	) != attr {
+	if ctx.RangeAttribute(llvm.AttributeRange, 32, nil, []uint64{12}) != attr {
 		t.Error("duplicate attribute is not equal")
 	}
 }
@@ -285,7 +275,7 @@ func TestStringAttributeSet(t *testing.T) {
 
 	// Test stringification.
 	if str := set.String(); str != "\"x\"=\"1\" \"y\"=\"xyzzy\"" {
-		t.Errorf("unexpectred string of attribute set: %q", str)
+		t.Errorf("unexpected string of attribute set: %q", str)
 	}
 
 	// A duplicate set should be equal.
@@ -297,7 +287,153 @@ func TestStringAttributeSet(t *testing.T) {
 	if ctx.AttributeSet(yAttr, xAttr) != set {
 		t.Error("element reversal produced a different set")
 	}
+
+	// Fetch the attributes from the set.
+	testGetStringAttr(t, set, "x", xAttr, "1")
+	testGetStringAttr(t, set, "y", yAttr, "xyzzy")
+
+	// Ensure an unrelated attribute is reported absent.
+	if attr, ok := set.GetStringAttr("apple"); ok {
+		t.Errorf("unexpected attribute %q (from Attribute.GetStringAttr)", attr)
+	}
+	if value, ok := set.GetString("apple"); ok {
+		t.Errorf("unexpected attribute \"apple\"=%q (from Attribute.GetString)", value)
+	}
 }
+
+func testGetStringAttr(t *testing.T, set llvm.AttributeSet, kind string, attr llvm.Attribute, value string) {
+	t.Helper()
+	if got, ok := set.GetStringAttr(kind); !ok {
+		t.Errorf("attribute %q reported missing by Attribute.GetStringAttr", kind)
+	} else if got != attr {
+		t.Errorf("attribute %q is %q (expected %q)", kind, got, attr)
+	}
+	if got, ok := set.GetString(kind); !ok {
+		t.Errorf("attribute %q reported missing by Attribute.GetString", kind)
+	} else if got != value {
+		t.Errorf("attribute %q is %q (expected %q)", kind, got, value)
+	}
+}
+
+func TestAttributeSetPtrRead(t *testing.T) {
+	t.Parallel()
+
+	// Create a context to test with.
+	ctx := llvm.CreateContext()
+	defer ctx.Destroy()
+
+	// Create a set for an aligned array of read-only bytes passed by value through a pointer.
+	readOnly := ctx.EnumAttribute(llvm.AttributeReadOnly)
+	align8 := ctx.IntAttribute(llvm.AttributeAlign, 8)
+	byteArr := ctx.Array(8, ctx.Int(8))
+	byValByteArr := ctx.TypeAttribute(llvm.AttributeByVal, byteArr)
+	set := ctx.AttributeSet(readOnly, align8, byValByteArr)
+
+	// Fetch the raw attributes from the set.
+	testGetAttr(t, set, string(llvm.AttributeReadOnly), readOnly)
+	testGetAttr(t, set, string(llvm.AttributeAlign), align8)
+	testGetAttr(t, set, string(llvm.AttributeByVal), byValByteArr)
+
+	// Read the attribute values back.
+	if !set.HasEnum(llvm.AttributeReadOnly) {
+		t.Error("readonly attribute reported missing")
+	}
+	if a, ok := set.GetInt(llvm.AttributeAlign); !ok {
+		t.Error("align attribute reported missing")
+	} else if a != 8 {
+		t.Errorf("unexpected alignment: %d", a)
+	}
+	if ty, ok := set.GetType(llvm.AttributeByVal); !ok {
+		t.Error("byval attribute reported missing")
+	} else if ty != byteArr {
+		t.Errorf("expected byval type %s but got %s", byteArr, ty)
+	}
+
+	// Ensure that other attributes are missing.
+	if set.HasEnum(llvm.AttributeWriteOnly) {
+		t.Error("set contains writeonly")
+	}
+	if size, ok := set.GetInt(llvm.AttributeDereferenceableOrNull); ok {
+		t.Errorf("set contains dereferenceable_or_null(%d)", size)
+	}
+	if ty, ok := set.GetType(llvm.AttributeByRef); ok {
+		t.Errorf("set contains byref(%s)", ty)
+	}
+}
+
+func TestAttributeSetRangeInt(t *testing.T) {
+	if !llvm.SupportsAttributeRange {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	// Create a context to test with.
+	ctx := llvm.CreateContext()
+	defer ctx.Destroy()
+
+	// Create a set for a string length on a 32-bit system.
+	zext := ctx.EnumAttribute(llvm.AttributeZeroExtend)
+	lenRange := ctx.RangeAttribute(llvm.AttributeRange, 32, []uint64{0}, []uint64{1 << 31})
+	set := ctx.AttributeSet(zext, lenRange)
+
+	// Fetch the raw attributes from the set.
+	testGetAttr(t, set, string(llvm.AttributeZeroExtend), zext)
+	testGetAttr(t, set, string(llvm.AttributeRange), lenRange)
+
+	// Read the attribute values back.
+	if !set.HasEnum(llvm.AttributeZeroExtend) {
+		t.Error("zeroext attribute reported missing")
+	}
+	if bits, lower, upper, ok := set.GetRange(llvm.AttributeRange); !ok {
+		t.Error("range attribute reported missing")
+	} else {
+		if bits != 32 {
+			t.Errorf("expected 32-bit range, but got %d bits", bits)
+		}
+		if !slices.Equal(lower, []uint64{0}) {
+			t.Errorf("unexpected lower bound: %v", lower)
+		}
+		if !slices.Equal(upper, []uint64{1 << 31}) {
+			t.Errorf("unexpected upper bound: %v", upper)
+		}
+	}
+}
+
+func testGetAttr(t *testing.T, set llvm.AttributeSet, kind string, value llvm.Attribute) {
+	t.Helper()
+	attr, ok := set.Get(kind)
+	if !ok {
+		t.Errorf("missing attribute %q", kind)
+	} else if attr != value {
+		t.Errorf("attribute %q is %q (expected %q)", kind, attr, value)
+	}
+}
+
+func TestMergeStringAttributeSets(t *testing.T) {
+	t.Parallel()
+
+	// Create a context to test with.
+	ctx := llvm.CreateContext()
+	defer ctx.Destroy()
+
+	// Create simple string attributes.
+	xAttr := ctx.StringAttribute("x", "1")
+	yAttr := ctx.StringAttribute("y", "xyzzy")
+
+	// Place the attributes into sets and merge them.
+	set := ctx.MergeAttributeSets(
+		ctx.AttributeSet(xAttr),
+		ctx.AttributeSet(yAttr),
+	)
+
+	// Test stringification.
+	if str := set.String(); str != "\"x\"=\"1\" \"y\"=\"xyzzy\"" {
+		t.Errorf("unexpectred string of attribute set: %q", str)
+	}
+}
+
+// TODO: test intersect
 
 func TestCaptureAttributes(t *testing.T) {
 	if llvm.VersionMajor < 20 {

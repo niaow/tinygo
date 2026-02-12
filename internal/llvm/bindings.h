@@ -130,6 +130,13 @@ LLVMGoAttributeSetRef LLVMGoAttributeSetCreate(
 	LLVMAttributeRef* attrs,
 	size_t len
 );
+LLVMAttributeRef LLVMGoAttributeSetGetString(LLVMGoAttributeSetRef set, LLVMGoStringRef key);
+bool LLVMGoAttributeSetGetStringValue(LLVMGoAttributeSetRef set, LLVMGoStringRef key, LLVMGoStringRef* dst);
+LLVMAttributeRef LLVMGoAttributeSetGet(LLVMGoAttributeSetRef set, LLVMGoStringRef kind);
+bool LLVMGoAttributeSetHasEnum(LLVMGoAttributeSetRef set, LLVMGoStringRef kind);
+bool LLVMGoAttributeSetGetInt(LLVMGoAttributeSetRef set, LLVMGoStringRef kind, uint64_t* dst);
+LLVMTypeRef LLVMGoAttributeSetGetType(LLVMGoAttributeSetRef set, LLVMGoStringRef kind);
+LLVMGoConstRange LLVMGoAttributeSetGetRange(LLVMGoAttributeSetRef set, LLVMGoStringRef kind);
 LLVMGoAttributeSetRef LLVMGoAttributeSetMerge(
 	LLVMContextRef ctx,
 	LLVMGoAttributeSetRef* sets,

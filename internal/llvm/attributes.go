@@ -205,6 +205,8 @@ const (
 // The range may wrap if upper is less than lower.
 // The range [0, 0) is used to represent an empty range.
 // The lower and upper bounds may not be equal otherwise.
+//
+// This panics if kind is not a valid range attribute name.
 func (ctx Context) RangeAttribute(kind RangeAttribute, bits uint32, lower []uint64, upper []uint64) Attribute {
 	ptr := C.LLVMGoCreateRangeAttribute(
 		ctx.ptr,
@@ -238,7 +240,7 @@ const (
 
 // SupportsAttributeRange indicates whether the current LLVM version supports range attributes.
 // https://github.com/llvm/llvm-project/pull/83171
-const SupportsAttributeRange = C.LLVM_VERSION_MAJOR >= 19
+const SupportsAttributeRange = VersionMajor >= 19
 
 // Kind checks whether the attribute is a string and reads the kind/key.
 func (attr Attribute) Kind() (kind string, isString bool) {
@@ -288,6 +290,10 @@ func (attr Attribute) RangeValue() (bits uint32, lower, upper []uint64) {
 	if val.bits == 0 {
 		panic("attribute is not a range")
 	}
+	return unpackRange(val)
+}
+
+func unpackRange(val C.LLVMGoConstRange) (bits uint32, lower, upper []uint64) {
 	// The bits value is <= 2^29, but the compiler does not know that.
 	// Temporarily widen to 64 bits to prove that it will not overflow.
 	words := (uint64(val.bits) + 63) / 64
@@ -309,7 +315,7 @@ type AttributeSet struct {
 // String formats the set as it would be printed in IR outside of a group.
 // An empty set becomes an empty string.
 func (set AttributeSet) String() string {
-	if set.ptr == nil {
+	if set == (AttributeSet{}) {
 		return ""
 	}
 	var dst string
@@ -328,6 +334,87 @@ func (ctx Context) AttributeSet(attrs ...Attribute) AttributeSet {
 		(*C.LLVMAttributeRef)(unsafe.Pointer(unsafe.SliceData(attrs))),
 		C.size_t(len(attrs)),
 	)}
+}
+
+// GetStringAttr finds a string attribute in the set.
+// Use GetString instead to get the value.
+func (set AttributeSet) GetStringAttr(key string) (Attribute, bool) {
+	if set == (AttributeSet{}) {
+		return Attribute{}, false
+	}
+	ptr := C.LLVMGoAttributeSetGetString(set.ptr, stringRef(key))
+	return Attribute{ptr}, ptr != nil
+}
+
+// GetString gets the value of a string attribute if it is present in the set.
+func (set AttributeSet) GetString(key string) (string, bool) {
+	if set == (AttributeSet{}) {
+		return "", false
+	}
+	var dst C.LLVMGoStringRef
+	ok := C.LLVMGoAttributeSetGetStringValue(set.ptr, stringRef(key), &dst)
+	return refAsString(dst), bool(ok)
+}
+
+// Get a non-string attribute if it is in the set.
+//
+// Use HasEnum/GetInt/GetType/GetRange instead to get the value.
+// Only use this if you actually want the attribute reference.
+//
+// This will return false if attr is not a valid attribute name.
+func (set AttributeSet) Get(key string) (Attribute, bool) {
+	if set == (AttributeSet{}) {
+		return Attribute{}, false
+	}
+	ptr := C.LLVMGoAttributeSetGet(set.ptr, stringRef(key))
+	return Attribute{ptr}, ptr != nil
+}
+
+// HasEnum checks if an enum attribute is present in the set.
+//
+// This will return false if attr is not a valid enum attribute name.
+func (set AttributeSet) HasEnum(attr EnumAttribute) bool {
+	if set == (AttributeSet{}) {
+		return false
+	}
+	return bool(C.LLVMGoAttributeSetHasEnum(set.ptr, stringRef(string(attr))))
+}
+
+// GetInt gets the value of an integer attribute if it is present in the set.
+//
+// This will return false if attr is not a valid integer attribute name.
+func (set AttributeSet) GetInt(attr IntAttribute) (uint64, bool) {
+	if set == (AttributeSet{}) {
+		return 0, false
+	}
+	var dst C.uint64_t
+	ok := C.LLVMGoAttributeSetGetInt(set.ptr, stringRef(string(attr)), &dst)
+	return uint64(dst), bool(ok)
+}
+
+// GetType gets the value of a type attribute if it is present in the set.
+//
+// This will return false if attr is not a valid type attribute name.
+func (set AttributeSet) GetType(attr TypeAttribute) (Type, bool) {
+	if set == (AttributeSet{}) {
+		return Type{}, false
+	}
+	ptr := C.LLVMGoAttributeSetGetType(set.ptr, stringRef(string(attr)))
+	return Type{ptr}, ptr != nil
+}
+
+// GetRange gets the value of a range attribute if it is present in the set.
+//
+// The returned slices are owned by the context and must not be modified.
+//
+// This will return false if attr is not a valid range attribute name.
+func (set AttributeSet) GetRange(attr RangeAttribute) (bits uint32, lower, upper []uint64, ok bool) {
+	if set == (AttributeSet{}) {
+		return 0, nil, nil, false
+	}
+	val := C.LLVMGoAttributeSetGetRange(set.ptr, stringRef(string(attr)))
+	bits, lower, upper = unpackRange(val)
+	return bits, lower, upper, bits != 0
 }
 
 // MergeAttributeSets combines the attributes from each set into a single set.

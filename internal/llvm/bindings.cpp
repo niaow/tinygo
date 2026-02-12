@@ -299,6 +299,28 @@ LLVMGoAttributeSetRef LLVMGoAttributeSetCreate(
 	}
 	return makeAttrSetRef(ctx, builder);
 }
+LLVMAttributeRef LLVMGoAttributeSetGetString(LLVMGoAttributeSetRef set, LLVMGoStringRef key) {
+	return wrap(unwrap(set).getAttribute(toStringRef(key)));
+}
+bool LLVMGoAttributeSetGetStringValue(LLVMGoAttributeSetRef set, LLVMGoStringRef key, LLVMGoStringRef* dst) {
+	return LLVMGoAttributeStringValue(LLVMGoAttributeSetGetString(set, key), dst);
+}
+LLVMAttributeRef LLVMGoAttributeSetGet(LLVMGoAttributeSetRef set, LLVMGoStringRef kind) {
+	return wrap(unwrap(set).getAttribute(Attribute::getAttrKindFromName(toStringRef(kind))));
+}
+bool LLVMGoAttributeSetHasEnum(LLVMGoAttributeSetRef set, LLVMGoStringRef kind) {
+	auto k = Attribute::getAttrKindFromName(toStringRef(kind));
+	return Attribute::isEnumAttrKind(k) && unwrap(set).hasAttribute(k);
+}
+bool LLVMGoAttributeSetGetInt(LLVMGoAttributeSetRef set, LLVMGoStringRef kind, uint64_t* dst) {
+	return LLVMGoAttributeIntValue(LLVMGoAttributeSetGet(set, kind), dst);
+}
+LLVMTypeRef LLVMGoAttributeSetGetType(LLVMGoAttributeSetRef set, LLVMGoStringRef kind) {
+	return LLVMGoAttributeTypeValue(LLVMGoAttributeSetGet(set, kind));
+}
+LLVMGoConstRange LLVMGoAttributeSetGetRange(LLVMGoAttributeSetRef set, LLVMGoStringRef kind) {
+	return LLVMGoAttributeRangeValue(LLVMGoAttributeSetGet(set, kind));
+}
 LLVMGoAttributeSetRef LLVMGoAttributeSetMerge(
 	LLVMContextRef ctx,
 	LLVMGoAttributeSetRef* sets,
