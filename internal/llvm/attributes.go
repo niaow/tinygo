@@ -584,3 +584,82 @@ var provenanceCaptureNames = [...]string{
 	ProvenanceCaptureReadOnly: "read_provenance",
 	ProvenanceCaptureNone:     "none",
 }
+
+// AttributeList holds attribute sets for a function or call.
+// The zero value represents an empty list.
+type AttributeList struct {
+	ptr C.LLVMGoAttributeListRef
+}
+
+// AttributeList creates an attribute list from the provided sets.
+func (ctx Context) AttributeList(
+	functionAttributes AttributeSet,
+	returnAttributes AttributeSet,
+	argumentAttributes ...AttributeSet,
+) AttributeList {
+	if len(argumentAttributes) > (1<<32)-2 {
+		// TODO: verify that this is the correct limit
+		panic("too many arguments")
+	}
+	return AttributeList{C.LLVMGoAttributeListCreate(
+		ctx.ptr,
+		functionAttributes.ptr,
+		returnAttributes.ptr,
+		(*C.LLVMGoAttributeSetRef)(unsafe.Pointer(unsafe.SliceData(argumentAttributes))),
+		C.unsigned(len(argumentAttributes)),
+	)}
+}
+
+// String formats the AttributeList.
+func (list AttributeList) String() string {
+	// LLVM's builtin formatting for an attribute does not mix with other formatting (newlines, not very readable).
+	// Format it ourselves, vaguely matching the layout of a function declaration.
+	if list == (AttributeList{}) {
+		return "@()"
+	}
+	var dst = make([]byte, 0, 64)
+	if ra := list.Return(); ra != (AttributeSet{}) {
+		dst = append(append(dst, ra.String()...), ' ')
+	}
+	dst = append(dst, "@("...)
+	args := list.Arguments()
+	if args > 0 {
+		dst = append(dst, list.Argument(0).String()...)
+		for i := uint32(1); i < args; i++ {
+			dst = append(append(dst, ", "...), list.Argument(1).String()...)
+		}
+	}
+	dst = append(dst, ')')
+	if fa := list.Function(); fa != (AttributeSet{}) {
+		dst = append(append(dst, ' '), fa.String()...)
+	}
+	return string(dst)
+}
+
+// Return gets the attribute set attached to the function return.
+func (list AttributeList) Return() AttributeSet {
+	if list == (AttributeList{}) {
+		return AttributeSet{}
+	}
+	return AttributeSet{C.LLVMGoAttibuteListGetReturn(list.ptr)}
+}
+
+// Function gets the attribute set attached to the function itself.
+func (list AttributeList) Function() AttributeSet {
+	if list == (AttributeList{}) {
+		return AttributeSet{}
+	}
+	return AttributeSet{C.LLVMGoAttibuteListGetFunction(list.ptr)}
+}
+
+// Argument gets the attribute set attached to an argument.
+func (list AttributeList) Argument(argument uint32) AttributeSet {
+	if list == (AttributeList{}) {
+		return AttributeSet{}
+	}
+	return AttributeSet{C.LLVMGoAttibuteListGetArgument(list.ptr, C.unsigned(argument))}
+}
+
+func (list AttributeList) Arguments() uint32 {
+	return uint32(C.LLVMGoAttributeListArguments(list.ptr))
+}

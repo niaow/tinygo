@@ -172,6 +172,19 @@ typedef struct {
 } LLVMGoCaptureInfo;
 LLVMGoAttributeSetRef LLVMGoCreateCaptureAttributes(LLVMContextRef ctx, LLVMGoCaptureInfo info);
 LLVMGoCaptureInfo LLVMGoGetCaptureInfo(LLVMGoAttributeSetRef attrs);
+// Attribute lists cannot be passed directly.
+// The context instead owns opaque pointers.
+LLVMGoAttributeListRef LLVMGoAttributeListCreate(
+	LLVMContextRef ctx,
+	LLVMGoAttributeSetRef functionAttributes,
+	LLVMGoAttributeSetRef returnAttributes,
+	LLVMGoAttributeSetRef* argumentAttributes,
+	unsigned argumentsLen
+);
+LLVMGoAttributeSetRef LLVMGoAttibuteListGetReturn(LLVMGoAttributeListRef list);
+LLVMGoAttributeSetRef LLVMGoAttibuteListGetFunction(LLVMGoAttributeListRef list);
+LLVMGoAttributeSetRef LLVMGoAttibuteListGetArgument(LLVMGoAttributeListRef list, unsigned index);
+unsigned LLVMGoAttributeListArguments(LLVMGoAttributeListRef list);
 
 LLVMBasicBlockRef LLVMGoAppendBasicBlock(LLVMValueRef fn, LLVMGoStringRef name);
 

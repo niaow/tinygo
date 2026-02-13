@@ -51,13 +51,17 @@ struct LLVMGoUniqueRefSet {
 		return slot.get();
 	}
 };
+struct LLVMGoAttributeList {
+	AttributeList list;
+	LLVMContextRef ctx;
+};
 struct LLVMGoContext {
 	// A struct can be safely pointer-cast to/from its first field type.
 	// The context must be first.
 	LLVMContext context;
 
-	LLVMGoUniqueRefSet<AttributeSet> attrSetRefs;
-	LLVMGoUniqueRefSet<AttributeList> attrListRefs;
+	DenseMap<AttributeSet, std::unique_ptr<AttributeSet>> attrSetRefs;
+	DenseMap<AttributeList, std::unique_ptr<LLVMGoAttributeList>> attrListRefs;
 };
 static LLVMContextRef wrap(LLVMGoContext* ptr) {
 	return reinterpret_cast<LLVMContextRef>(ptr);
@@ -279,7 +283,19 @@ LLVMGoConstRange LLVMGoAttributeRangeValue(LLVMAttributeRef attr) {
 }
 // Attribute sets
 static LLVMGoAttributeSetRef goWrap(LLVMContextRef ctx, AttributeSet set) {
-	return reinterpret_cast<LLVMGoAttributeSetRef>(goUnwrap(ctx)->attrSetRefs.wrap(set));
+	// Map the empty set to null.
+	if (set == AttributeSet()) {
+		return nullptr;
+	}
+
+	// Find or create an entry in the map.
+	std::unique_ptr<AttributeSet> &slot = goUnwrap(ctx)->attrSetRefs[set];
+	if (!slot) {
+		// Populate the new entry.
+		slot.reset(new AttributeSet(set));
+	}
+
+	return reinterpret_cast<LLVMGoAttributeSetRef>(slot.get());
 }
 static LLVMGoAttributeSetRef makeAttrSetRef(LLVMContextRef ctx, const AttrBuilder &builder) {
 	return goWrap(ctx, AttributeSet::get(*unwrap(ctx), builder));
@@ -437,8 +453,63 @@ LLVMGoCaptureInfo LLVMGoGetCaptureInfo(LLVMGoAttributeSetRef attrs) {
 }
 #endif
 // Attribute lists
-static AttributeList* unwrap(LLVMGoAttributeListRef ref) {
-	return reinterpret_cast<AttributeList*>(ref);
+static LLVMGoAttributeList* unwrap(LLVMGoAttributeListRef ref) {
+	return reinterpret_cast<LLVMGoAttributeList*>(ref);
+}
+static LLVMGoAttributeListRef goWrap(LLVMContextRef ctx, AttributeList list) {
+	// Map the empty list value to null.
+	if (list == AttributeList()) {
+		return nullptr;
+	}
+
+	// Find or create an entry in the map.
+	std::unique_ptr<LLVMGoAttributeList> &slot = goUnwrap(ctx)->attrListRefs[list];
+	if (!slot) {
+		// Populate the new entry.
+		slot.reset(new LLVMGoAttributeList({list, ctx}));
+	}
+
+	return reinterpret_cast<LLVMGoAttributeListRef>(slot.get());
+}
+LLVMGoAttributeListRef LLVMGoAttributeListCreate(
+	LLVMContextRef ctx,
+	LLVMGoAttributeSetRef functionAttributes,
+	LLVMGoAttributeSetRef returnAttributes,
+	LLVMGoAttributeSetRef* argumentAttributes,
+	unsigned argumentsLen
+) {
+	AttributeSet fa = unwrap(functionAttributes);
+	AttributeSet ra = unwrap(returnAttributes);
+	SmallVector<AttributeSet, 8> aa(argumentsLen);
+	for (unsigned i = 0; i < argumentsLen; i++) {
+		aa[i] = unwrap(argumentAttributes[i]);
+	}
+	return goWrap(ctx, AttributeList::get(*unwrap(ctx), fa, ra, aa));
+}
+static LLVMGoAttributeSetRef LLVMGoAttibuteListGet(LLVMGoAttributeListRef list, unsigned index) {
+	if (list == nullptr) {
+		return nullptr;
+	}
+	LLVMGoAttributeList* l = unwrap(list);
+	AttributeSet set = l->list.getAttributes(index);
+	return goWrap(l->ctx, set);
+}
+LLVMGoAttributeSetRef LLVMGoAttibuteListGetReturn(LLVMGoAttributeListRef list) {
+	return LLVMGoAttibuteListGet(list, AttributeList::ReturnIndex);
+}
+LLVMGoAttributeSetRef LLVMGoAttibuteListGetFunction(LLVMGoAttributeListRef list) {
+	return LLVMGoAttibuteListGet(list, AttributeList::FunctionIndex);
+}
+LLVMGoAttributeSetRef LLVMGoAttibuteListGetArgument(LLVMGoAttributeListRef list, unsigned index) {
+	return LLVMGoAttibuteListGet(list, AttributeList::FirstArgIndex + index);
+}
+unsigned LLVMGoAttributeListArguments(LLVMGoAttributeListRef list) {
+	if (list == nullptr) {
+		return 0;
+	}
+	// The first two entries in the list (if present) are the function attributes and the return attributes.
+	// Subtract them from the total set count.
+	return std::max(unwrap(list)->list.getNumAttrSets(), 2u) - 2;
 }
 
 // Basic-block manipulation
@@ -1773,34 +1844,37 @@ LLVMValueRef LLVMGoCreateFieldPointer(
 }
 
 // Stringification
-template<typename T>
-static void LLVMGoPrintToString(void* dst, T src) {
+void LLVMGoTypeString(void* dst, LLVMTypeRef src) {
 	std::string str;
 	raw_string_ostream stream(str);
-	src->print(stream);
+	unwrap(src)->print(stream);
 	LLVMGoConvertString(dst, str);
 }
-void LLVMGoTypeString(void* dst, LLVMTypeRef src) {
-	LLVMGoPrintToString(dst, unwrap(src));
-}
 void LLVMGoValueString(void* dst, LLVMValueRef src) {
-	LLVMGoPrintToString(dst, unwrap(src));
+	std::string str;
+	raw_string_ostream stream(str);
+	unwrap(src)->print(stream);
+	LLVMGoConvertString(dst, str);
 }
 void LLVMGoAttributeString(void* dst, LLVMAttributeRef src) {
-	// The string conversion is entirely different for attributes.
 	std::string str = unwrap(src).getAsString();
 	LLVMGoConvertString(dst, str);
 }
 void LLVMGoAttributeSetString(void* dst, LLVMGoAttributeSetRef src) {
-	// The string conversion is entirely different for attribute sets.
 	std::string str = unwrap(src).getAsString();
 	LLVMGoConvertString(dst, str);
 }
 void LLVMGoAttributeListString(void* dst, LLVMGoAttributeListRef src) {
-	LLVMGoPrintToString(dst, unwrap(src));
+	std::string str;
+	raw_string_ostream stream(str);
+	AttributeList list;
+	if (src != nullptr) {
+		list = unwrap(src)->list;
+	}
+	list.print(stream);
+	LLVMGoConvertString(dst, str);
 }
 void LLVMGoModuleString(void* dst, LLVMModuleRef src) {
-	// The string conversion for a module adds the AssemblyAnnotationWriter parameter.
 	std::string str;
 	raw_string_ostream stream(str);
 	unwrap(src)->print(stream, nullptr);

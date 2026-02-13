@@ -548,3 +548,51 @@ func TestLegacyNoCapture(t *testing.T) {
 		t.Errorf("unexpected info from empty set: %q", info)
 	}
 }
+
+func TestAttributeList(t *testing.T) {
+	t.Parallel()
+
+	// Create a context to test with.
+	ctx := llvm.CreateContext()
+	defer ctx.Destroy()
+
+	// Create an attribute list for a func(string) *byte with nounwind.
+	// TODO: add nounwind to the attribute constants
+	funcAttrs := ctx.AttributeSet(ctx.EnumAttribute("nounwind"))
+	derefOrNullByte := ctx.IntAttribute(llvm.AttributeDereferenceableOrNull, 1)
+	retAttrs := ctx.AttributeSet(derefOrNullByte)
+	strPtrAttrs := ctx.AttributeSet(
+		derefOrNullByte,
+		ctx.EnumAttribute(llvm.AttributeReadOnly),
+		ctx.EnumAttribute(llvm.AttributeNoAlias),
+	)
+	// Omit the range attribute for now for compat.
+	strLenAttrs := ctx.AttributeSet(ctx.EnumAttribute(llvm.AttributeZeroExtend))
+	list := ctx.AttributeList(funcAttrs, retAttrs, strPtrAttrs, strLenAttrs)
+
+	// Read the sets back.
+	if set := list.Function(); set != funcAttrs {
+		t.Error("unexpected function attributes:", set)
+	}
+	if set := list.Return(); set != retAttrs {
+		t.Error("unexpected return attributes:", set)
+	}
+	if set := list.Argument(0); set != strPtrAttrs {
+		t.Error("unexpected arg 0 attributes:", set)
+	}
+	if set := list.Argument(1); set != strLenAttrs {
+		t.Error("unexpected arg 1 attributes:", set)
+	}
+	// Extra argument indices should produce an empty set.
+	if set := list.Argument(2); set != (llvm.AttributeSet{}) {
+		t.Error("unexpected arg 2 attributes:", set)
+	}
+
+	// Test stringification.
+	if str := (llvm.AttributeList{}).String(); str != "@()" {
+		t.Errorf("empty attribute list formatted as: %q", str)
+	}
+	if str := list.String(); str != "dereferenceable_or_null(1) @(noalias readonly dereferenceable_or_null(1), zeroext) nounwind" {
+		t.Errorf("test list formatted as %q", str)
+	}
+}
