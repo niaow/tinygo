@@ -4,7 +4,9 @@ package llvm
 #include "bindings.h"
 */
 import "C"
-import "unsafe"
+import (
+	"unsafe"
+)
 
 // Attribute represents a single LLVM IR attribute.
 type Attribute struct {
@@ -26,6 +28,20 @@ func (ctx Context) StringAttribute(key, value string) Attribute {
 		stringRef(value),
 	)}
 }
+
+// StringAttribute is the key of a string pair attribute.
+type StringAttribute = string
+
+const (
+	// AttributeAllocFamily is used to identify corresponding sets of allocation functions.
+	AttributeAllocFamily StringAttribute = "alloc-family"
+
+	// AttributeTargetCPU is used to specifiy the CPU type to assume when compiling a function.
+	AttributeTargetCPU StringAttribute = "target-cpu"
+
+	// AttributeTargetFeatures holds a comma-seperated list of instruction set extensions to assume when compiling a function.
+	AttributeTargetFeatures StringAttribute = "target-features"
+)
 
 // EnumAttribute creates an attribute with no value.
 // This panics if kind is not a valid enum attribute name.
@@ -53,7 +69,6 @@ const (
 	//
 	// This EnumAttribute is only valid for arguments or returns.
 	AttributeZeroExtend EnumAttribute = "zeroext"
-
 	// AttributeSignExtend indicates that an integer argument or return value must be zero-extended by the callee/caller.
 	//
 	// This attribute is part of the function/call signature.
@@ -89,18 +104,57 @@ const (
 	// It must be applied to both the function and the call site.
 	AttributeNoUndef EnumAttribute = "noundef"
 
-	// AttributeReadNone indicates that the function will not access memory based on an argument.
-	// Contrary to the name, this also disallows writes.
+	// AttributeNoAccess indicates that the function will not access memory based on an argument.
 	// The corresponding memory may still be accessed via other methods (e.g. other arguments).
-	AttributeReadNone EnumAttribute = "readnone"
-
+	AttributeNoAccess EnumAttribute = "readnone"
 	// AttributeReadOnly indicates that the function will not write memory based on an argument.
 	//
 	// When used in conjunction with AttributeNoAlias, this indicates that the memory is immutable.
 	AttributeReadOnly EnumAttribute = "readonly"
-
 	// AttributeWriteOnly indicates that the function will not read memory based on an argument.
 	AttributeWriteOnly EnumAttribute = "writeonly"
+
+	// AttributeAllocAlignment indicates that this argument holds the requested alignment for a memory allocation.
+	AttributeAllocAlignment EnumAttribute = "allocalign"
+	// AttributeAllocPointer indicates that this argument will be manipulated by the memory allocator.
+	// This only has meaning when used in conjunction with AllocKindRealloc or AllocKindFree.
+	AttributeAllocPointer EnumAttribute = "allocptr"
+
+	// AttributeReturnsTwice indicates that this function may return twice.
+	// This must be applied to setjmp-like functions.
+	AttributeReturnsTwice EnumAttribute = "returns_twice"
+
+	// AttributeInlineAlways indicates that the function or call should ignore inlining heuristics.
+	// This does not guarantee that the function will be inlined (e.g. if inlining is disabled or impossible).
+	AttributeInlineAlways EnumAttribute = "alwaysinline"
+	// AttributeInlineHint is a hint that the function or call should be inlined.
+	// This is weaker than AttributeInlineAlways, and the inliner may ignore it.
+	// This matches the C "inline" keyword.
+	AttributeInlineHint EnumAttribute = "inlinehint"
+	// AttributeInlineNever prevents the function or call from being inlined.
+	AttributeInlineNever EnumAttribute = "noinline"
+
+	// AttributeCold indicates that the function/call is rarely reached.
+	AttributeCold EnumAttribute = "cold"
+
+	// AttributeOptNone disables most optimizations for a function.
+	// This cannot be combined with other optimization attributes.
+	AttributeOptNone EnumAttribute = "optnone"
+	// AttributeOptSize prioritizes size optimizations for a function.
+	AttributeOptSize EnumAttribute = "optsize"
+	// AttributeMinSize requests that the size of a function be minimized, even if it will dramatically impact performance.
+	AttributeOptMinSize EnumAttribute = "minsize"
+	// AttributeOptDebug requests that optimizations for a function preserve debug information as much as possible.
+	// This cannot be combined with other optimization attributes.
+	//
+	// This requires LLVM 18 or newer.
+	AttributeOptDebug EnumAttribute = "optdebug"
+
+	// AttributeNoReturn indicates that the function/call will not return normally.
+	// Any code following the call is assumed dead.
+	AttributeNoReturn EnumAttribute = "noreturn"
+	// AttributeNoUnwind indicates that the function/call will not throw a synchronous exception.
+	AttributeNoUnwind EnumAttribute = "nounwind"
 )
 
 // IntAttribute creates an attribute with an integer value.
@@ -140,6 +194,77 @@ const (
 	//
 	// This attribute is only valid for pointer arguments and returns.
 	AttributeDereferenceableOrNull IntAttribute = "dereferenceable_or_null"
+
+	// AttributeAllocKind holds information about how a function allocates memory.
+	AttributeAllocKind IntAttribute = "allockind"
+
+	// AttributeAllocSize describes how the size of an allocation will be calculated.
+	//
+	// Use EncodeAllocSize/DecodeAllocSize to create or read the value.
+	AttributeAllocSize IntAttribute = "allocsize"
+
+	// AttributeUnwindTable is used when an ABI (ELF x86_64) always requires unwind tables.
+	// The value specifies what type of unwind table to generate.
+	// Pass UnwindTableNone/UnwindTableSynchronous/UnwindTableAsynchronous as the value.
+	AttributeUnwindTable IntAttribute = "uwtable"
+)
+
+// The encoding of allockind is somewhat fragile, but there is not much we can do about that.
+// Just redefine the bit set here.
+const (
+	// AllocKindAlloc indicates that the returned pointer (if not null) refers to newly allocated memory.
+	// This cannot be combined with AllocKindRealloc/AllocKindFree.
+	AllocKindAlloc uint64 = 1 << 0
+	// AllocKindRealloc indicates that the function resizes (and possibly moves) the arugment with AttributeAllocPointer.
+	// If the return is null, the original argument remains valid and is not resized.
+	// This cannot be combined with AllocKindAlloc/AllocKindFree.
+	AllocKindRealloc uint64 = 1 << 1
+	// AllocKindFree indicates that the argument with AttributeAllocPointer is freed.
+	// This cannot be combined with AllocKindAlloc/AllocKindRealloc.
+	AllocKindFree uint64 = 1 << 2
+
+	// AllocKindUninitialized indicates that the new portion of the memory is uninitialized.
+	AllocKindUninitialized uint64 = 1 << 3
+	// AllocKindZeroed indicates that the new portion of the memory is initialized with zero bytes.
+	AllocKindZeroed uint64 = 1 << 4
+
+	// AllocKindAligned indicates that the returned pointer is aligned according to the argument with AttributeAllocAlignment.
+	AllocKindAligned uint64 = 1 << 5
+)
+
+// EncodeAllocSize encodes an allocation size attribute.
+//
+// The elementSize is the size of an allocated element in bytes.
+// The elementCountArgument is the index of the argument holding the number of allocated elements.
+// These values are multiplied to compute the allocated size.
+//
+// The elementCountArgument may be set to AllocSizeUnknownElementCount if the element count is not an argument.
+func EncodeAllocSize(elementSize, elementCountArgument uint32) uint64 {
+	return (uint64(elementSize) << 32) | uint64(elementCountArgument)
+}
+
+// DecodeAllocSize decodes an allocation size attribute.
+//
+// The elementSize is the size of an allocated element in bytes.
+// The elementCountArgument is the index of the argument holding the number of allocated elements.
+// These values are multiplied to compute the allocated size.
+//
+// The elementCountArgument may be set to AllocSizeUnknownElementCount if the element count is not an argument.
+func DecodeAllocSize(raw uint64) (elementSize, elementCountArgument uint32) {
+	return uint32(raw >> 32), uint32(raw)
+}
+
+// AllocSizeOneElement indicates that the number of allocated elements is 1.
+// This is used as a sentinel for the elementCount argument of AttributeAllocSize.
+const AllocSizeOneElement = ^uint32(0)
+
+const (
+	// UnwindTableSynchronous creates a synchronous unwind table.
+	UnwindTableSynchronous uint64 = 1
+
+	// UnwindTableAsynchronous creates an asynchronous unwind table.
+	// This permits unwinding from any instruction in the function.
+	UnwindTableAsynchronous uint64 = 2
 )
 
 // TypeAttribute creates an attribute with a type value.
@@ -583,6 +708,165 @@ var provenanceCaptureNames = [...]string{
 	ProvenanceCaptureFull:     "provenance",
 	ProvenanceCaptureReadOnly: "read_provenance",
 	ProvenanceCaptureNone:     "none",
+}
+
+// MemoryEffects creates a function attribute set from the memory effects.
+func (ctx Context) MemoryEffects(effects MemoryEffects) AttributeSet {
+	if effects == (MemoryEffects{}) {
+		return AttributeSet{}
+	}
+	return AttributeSet{C.LLVMGoCreateMemoryEffectsAttributes(ctx.ptr, effects.flags)}
+}
+
+// MemoryEffects inspects memory effects attributes from a function attribute set.
+func (set AttributeSet) MemoryEffects() MemoryEffects {
+	if set == (AttributeSet{}) {
+		return MemoryEffects{}
+	}
+	return MemoryEffects{C.LLVMGoGetMemoryEffects(set.ptr)}
+}
+
+// MemoryEffects tracks the means by which a function may access memory.
+// This behaves like a map[MemoryLocation]MemoryAccess.
+type MemoryEffects struct {
+	flags C.LLVMGoMemoryEffectsMask
+}
+
+// String formats the MemoryEffects as they would be printed in IR by LLVM 21.
+func (effects MemoryEffects) String() string {
+	// Check if all locations are the same.
+	other := effects.Get(MemoryLocationOther)
+	otherAll := other.All()
+	if effects == otherAll {
+		return other.String()
+	}
+
+	// Format the differing locations.
+	var buf = make([]byte, 0, 64)
+	var needsComma bool
+	if other != MemoryAccessNone {
+		buf = append(buf, other.String()...)
+		needsComma = true
+	}
+	for location := MemoryLocationOther + 1; location <= MemoryLocationLast; location++ {
+		flags := effects.Get(location)
+		if flags == other {
+			continue
+		}
+		if needsComma {
+			buf = append(buf, ", "...)
+		}
+		buf = append(buf, location.String()...)
+		buf = append(buf, ": "...)
+		buf = append(buf, flags.String()...)
+		needsComma = true
+	}
+	return string(buf)
+}
+
+// Get the memory access flags for a location.
+func (effects MemoryEffects) Get(location MemoryLocation) MemoryAccess {
+	return MemoryAccess(effects.flags>>location.shift()) & MemoryAccessNone
+}
+
+// Intersect combines two MemoryEffects constraints for the same operation.
+func (effects MemoryEffects) Intersect(other MemoryEffects) MemoryEffects {
+	return MemoryEffects{effects.flags | other.flags}
+}
+
+// Union combines two MemoryEffects constraints from separate operations.
+func (effects MemoryEffects) Union(other MemoryEffects) MemoryEffects {
+	return MemoryEffects{effects.flags & other.flags}
+}
+
+// Satisfies checks if the provided effects satisfy the provided constraints.
+// For example effects.Satisfies(MemoryAccessNoRead.All()) checks if no memory will be read.
+func (effects MemoryEffects) Satisfies(constraints MemoryEffects) bool {
+	return constraints.flags&^effects.flags != 0
+}
+
+// MemoryAccess is a set of flags used to specify whether reads or writes to memory are possible.
+// The zero value implies that both are possible.
+type MemoryAccess C.LLVMGoMemoryAccessFlags
+
+const (
+	// MemoryAccessAny permits reads and writes.
+	MemoryAccessAny MemoryAccess = C.LLVMGoMemoryAccessAny
+
+	// MemoryAccessNoRead indicates that no memory reads are possible.
+	MemoryAccessNoRead MemoryAccess = C.LLVMGoMemoryAccessNoRead
+
+	// MemoryAccessNoWrite indicates that no memory writes are possible.
+	MemoryAccessNoWrite MemoryAccess = C.LLVMGoMemoryAccessNoWrite
+
+	// MemoryAccessNone indicates that no memory will be read or written.
+	MemoryAccessNone MemoryAccess = MemoryAccessNoRead | MemoryAccessNoWrite
+)
+
+func (access MemoryAccess) String() string {
+	return memoryAccessNames[access]
+}
+
+var memoryAccessNames = [...]string{
+	MemoryAccessAny:     "readwrite",
+	MemoryAccessNoRead:  "write",
+	MemoryAccessNoWrite: "read",
+	MemoryAccessNone:    "none",
+}
+
+// All applies the MemoryAccess constraints to all locations.
+func (access MemoryAccess) All() MemoryEffects {
+	return MemoryEffects{C.LLVMGoMemoryEffectsMask(access) * C.LLVMGoMemoryEffectsBroadcast}
+}
+
+// Only creates MemoryEffects for an access to a specific location only.
+func (access MemoryAccess) Only(location MemoryLocation) MemoryEffects {
+	return access.At(location).Intersect(location.Only())
+}
+
+// At creates MemoryEffects which may only access a location in a specific manner.
+// All other locations are unconstrained.
+func (access MemoryAccess) At(location MemoryLocation) MemoryEffects {
+	return MemoryEffects{C.LLVMGoMemoryEffectsMask(access) << location.shift()}
+}
+
+// MemoryLocation is used to specify what memory to apply a MemoryAccess constraint to.
+type MemoryLocation C.LLVMGoMemoryLocation
+
+const (
+	// MemoryLocationOther is used for memory locations which lack a specialization.
+	MemoryLocationOther MemoryLocation = C.LLVMGoMemoryLocationOther
+	// MemoryLocationArguments is used to constrain how the function will access memory through its arguments.
+	MemoryLocationArguments MemoryLocation = C.LLVMGoMemoryLocationArguments
+	// MemoryLocationInaccessible is used to constrain how the function will access memory outside the current module.
+	MemoryLocationInaccessible MemoryLocation = C.LLVMGoMemoryLocationInaccessible
+	// MemoryLocationErrno is used to constrain how the function will access the C errno value.
+	// This location was added in LLVM 21 and is merged to/from MemoryLocationOther for prior versions.
+	MemoryLocationErrno MemoryLocation = C.LLVMGoMemoryLocationErrno
+
+	// MemoryLocationLast is the highest-index memory location.
+	// This is useful for looping over locations.
+	MemoryLocationLast = MemoryLocationErrno
+)
+
+func (location MemoryLocation) String() string {
+	return memoryLocationNames[location]
+}
+
+var memoryLocationNames = [...]string{
+	MemoryLocationOther:        "other",
+	MemoryLocationArguments:    "argmem",
+	MemoryLocationInaccessible: "inaccessiblemem",
+	MemoryLocationErrno:        "errnomem",
+}
+
+// Only creates MemoryEffects that may only access this location.
+func (location MemoryLocation) Only() MemoryEffects {
+	return MemoryEffects{MemoryAccessNone.All().flags &^ MemoryAccessNone.At(location).flags}
+}
+
+func (location MemoryLocation) shift() uint {
+	return uint(location) * C.LLVMGoMemoryAccessFlagsBits
 }
 
 // AttributeList holds attribute sets for a function or call.

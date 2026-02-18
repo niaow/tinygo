@@ -452,6 +452,152 @@ LLVMGoCaptureInfo LLVMGoGetCaptureInfo(LLVMGoAttributeSetRef attrs) {
 	};
 }
 #endif
+static uint8_t shift(LLVMGoMemoryLocation location) {
+	return LLVMGoMemoryAccessFlagsBits * uint8_t(location);
+}
+static LLVMGoMemoryEffectsMask at(LLVMGoMemoryAccessFlags flags, LLVMGoMemoryLocation location) {
+	return LLVMGoMemoryEffectsMask(flags) << shift(location);
+}
+static LLVMGoMemoryAccessFlags get(LLVMGoMemoryEffectsMask mask, LLVMGoMemoryLocation location) {
+	return LLVMGoMemoryAccessFlags((mask >> shift(location)) & LLVMGoMemoryAccessNone);
+}
+static LLVMGoMemoryEffectsMask broadcast(LLVMGoMemoryAccessFlags flags) {
+	return LLVMGoMemoryEffectsMask(flags) * LLVMGoMemoryEffectsBroadcast;
+}
+static LLVMGoMemoryEffectsMask only(LLVMGoMemoryLocation location) {
+	return broadcast(LLVMGoMemoryAccessNone) &~ at(LLVMGoMemoryAccessNone, location);
+}
+#if LLVM_VERSION_MAJOR >= 16
+static ModRefInfo convertAccessFlags(LLVMGoMemoryAccessFlags flags) {
+	return 
+		((flags&LLVMGoMemoryAccessNoRead) == 0 ? ModRefInfo::Ref : ModRefInfo::NoModRef) |
+		((flags&LLVMGoMemoryAccessNoWrite) == 0 ? ModRefInfo::Mod : ModRefInfo::NoModRef);
+}
+static MemoryEffects convertEffectsLocation(LLVMGoMemoryEffectsMask mask, LLVMGoMemoryLocation src, MemoryEffects::Location dst) {
+	return MemoryEffects(dst, convertAccessFlags(get(mask, src)));
+}
+#if LLVM_VERSION_MAJOR >= 17
+#define IRMemLocationValues IRMemLocation
+#else
+#define IRMemLocationValues MemoryEffects
+#endif
+static MemoryEffects convertEffectsMask(LLVMGoMemoryEffectsMask mask) {
+	return 
+		convertEffectsLocation(mask, LLVMGoMemoryLocationArguments, IRMemLocationValues::ArgMem) |
+		convertEffectsLocation(mask, LLVMGoMemoryLocationInaccessible, IRMemLocationValues::InaccessibleMem) |
+#if LLVM_VERSION_MAJOR >= 21
+		convertEffectsLocation(mask, LLVMGoMemoryLocationErrno, IRMemLocationValues::ErrnoMem) |
+#else
+		// LLVM 20 and lower lack errnomem.
+		// Merge it into the other location for compatability.
+		convertEffectsLocation(mask, LLVMGoMemoryLocationErrno, IRMemLocationValues::Other) |
+#endif
+		convertEffectsLocation(mask, LLVMGoMemoryLocationOther, IRMemLocationValues::Other);
+}
+LLVMGoAttributeSetRef LLVMGoCreateMemoryEffectsAttributes(LLVMContextRef ctx, LLVMGoMemoryEffectsMask mask) {
+	MemoryEffects effects = convertEffectsMask(mask);
+	if (effects == MemoryEffects::unknown()) {
+		// Return the empty set if this provides no extra information.
+		return nullptr;
+	}
+	LLVMContext* c = unwrap(ctx);
+	return goWrap(ctx, AttributeSet::get(*c, Attribute::getWithMemoryEffects(*c, effects)));
+}
+static LLVMGoMemoryAccessFlags goWrap(ModRefInfo info) {
+	return LLVMGoMemoryAccessFlags(
+		(isRefSet(info) ? 0 : unsigned(LLVMGoMemoryAccessNoRead)) |
+		(isModSet(info) ? 0 : unsigned(LLVMGoMemoryAccessNoWrite))
+	);
+}
+static LLVMGoMemoryEffectsMask convertEffectsLocation(MemoryEffects effects, MemoryEffects::Location src, LLVMGoMemoryLocation dst) {
+	return at(goWrap(effects.getModRef(src)), dst);
+}
+static LLVMGoMemoryEffectsMask goWrap(MemoryEffects effects) {
+	return
+		convertEffectsLocation(effects, IRMemLocationValues::ArgMem, LLVMGoMemoryLocationArguments) |
+		convertEffectsLocation(effects, IRMemLocationValues::InaccessibleMem, LLVMGoMemoryLocationInaccessible) |
+#if LLVM_VERSION_MAJOR >= 21
+		convertEffectsLocation(effects, IRMemLocationValues::ErrnoMem, LLVMGoMemoryLocationErrno) |
+#else
+		// LLVM 20 and lower lack errnomem.
+		// Merge from the other location for compatability.
+		convertEffectsLocation(effects, IRMemLocationValues::Other, LLVMGoMemoryLocationErrno) |
+#endif
+		convertEffectsLocation(effects, IRMemLocationValues::Other, LLVMGoMemoryLocationOther);
+}
+LLVMGoMemoryEffectsMask LLVMGoGetMemoryEffects(LLVMGoAttributeSetRef set) {
+	return goWrap(unwrap(set).getMemoryEffects());
+}
+#else
+LLVMGoAttributeSetRef LLVMGoCreateMemoryEffectsAttributes(LLVMContextRef ctx, LLVMGoMemoryEffectsMask mask) {
+	if (mask == 0) {
+		// This has no attributes.
+		return nullptr;
+	}
+
+	AttributeSet set;
+	if (mask == broadcast(LLVMGoMemoryAccessNone)) {
+		// No memory is accessed.
+		set = AttributeSet::get(*c, Attribute::get(*c, Attribute::ReadNone));
+	} else {
+		AttrBuilder builder(unwrap(ctx));
+
+		// Add attributes to constrain the location.
+		LLVMGoMemoryEffectsMask argMemOnly = only(LLVMGoMemoryLocationArguments);
+		LLVMGoMemoryEffectsMask inaccessibleMemOnly = only(LLVMGoMemoryLocationInaccessible);
+		if ((argMemOnly & inaccessibleMemOnly) &~ mask == 0) {
+			builder.addAttribute(
+				argMemOnly &~ mask == 0 ? Attribute::ArgMemOnly :
+				inaccessibleMemOnly &~ mask == 0 ? Attribute::InaccessibleMemOnly :
+				Attribute::InaccessibleMemOrArgMemOnly
+			);
+		}
+
+		// Add attributes to constrain the means of access.
+		if (broadcast(LLVMGoMemoryAccessNoWrite) &~ mask == 0) {
+			builder.addAttribute(Attribute::ReadOnly);
+		} else (broadcast(LLVMGoMemoryAccessNoRead) &~ mask == 0) {
+			builder.addAttribute(Attribute::WriteOnly);
+		}
+
+		// Convert the accumulated assets to a set.
+		set = AttributeSet::get(*c, builder);
+	}
+	return goWrap(ctx, set);
+}
+struct LLVMGoLegacyMemoryAttribute {
+	Attribute::AttrKind kind;
+	LLVMGoMemoryEffectsMask mask;
+};
+static const LLVMGoLegacyMemoryAttribute LLVMGoLegacyMemoryAttributes[] = {
+	{Attribute::ArgMemOnly, only(LLVMGoMemoryLocationArguments)},
+	{Attribute::InaccessibleMemOnly, only(LLVMGoMemoryLocationInaccessible)},
+	{Attribute::InaccessibleMemOrArgMemOnly, only(LLVMGoMemoryLocationArguments) & only(LLVMGoMemoryLocationInaccessible)},
+	{Attribute::ReadOnly, broadcast(LLVMGoMemoryAccessNoWrite)},
+	{Attribute::WriteOnly, broadcast(LLVMGoMemoryAccessNoRead)},
+};
+LLVMGoMemoryEffectsMask LLVMGoGetMemoryEffects(LLVMGoAttributeSetRef set) {
+	AttributeSet set = unwrap(set);
+	if (!set.hasAttributes()) {
+		// The empty set has no attributes.
+		return 0;
+	}
+
+	if (set.hasAttribute(Attribute::ReadNone)) {
+		// This does not access any memory.
+		return broadcast(LLVMGoMemoryAccessNone);
+	}
+
+	// Construct the mask from the component attributes.
+	LLVMGoMemoryEffectsMask mask = 0;
+	for (LLVMGoLegacyMemoryAttribute& attr : LLVMGoLegacyMemoryAttributes) {
+		if (set.hasAttribute(attr.kind)) {
+			mask |= attr.mask;
+		}
+	}
+	return mask;
+}
+#endif
 // Attribute lists
 static LLVMGoAttributeList* unwrap(LLVMGoAttributeListRef ref) {
 	return reinterpret_cast<LLVMGoAttributeList*>(ref);

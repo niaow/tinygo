@@ -46,16 +46,33 @@ func TestStringAttribute(t *testing.T) {
 func TestEnumAttributes(t *testing.T) {
 	t.Parallel()
 
-	for _, kind := range []llvm.EnumAttribute{
+	var attrs = []llvm.EnumAttribute{
 		llvm.AttributeZeroExtend,
 		llvm.AttributeSignExtend,
 		llvm.AttributeNoAlias,
 		llvm.AttributeNonNull,
 		llvm.AttributeNoUndef,
-		llvm.AttributeReadNone,
+		llvm.AttributeNoAccess,
 		llvm.AttributeReadOnly,
 		llvm.AttributeWriteOnly,
-	} {
+		llvm.AttributeAllocAlignment,
+		llvm.AttributeAllocPointer,
+		llvm.AttributeReturnsTwice,
+		llvm.AttributeInlineAlways,
+		llvm.AttributeInlineHint,
+		llvm.AttributeInlineNever,
+		llvm.AttributeCold,
+		llvm.AttributeOptNone,
+		llvm.AttributeOptSize,
+		llvm.AttributeOptMinSize,
+		llvm.AttributeNoReturn,
+		llvm.AttributeNoUnwind,
+	}
+	if llvm.VersionMajor >= 18 {
+		attrs = append(attrs, llvm.AttributeOptDebug)
+	}
+
+	for _, kind := range attrs {
 		kind := kind
 		t.Run(string(kind), func(t *testing.T) {
 			t.Parallel()
@@ -116,6 +133,26 @@ func TestIntAttribute(t *testing.T) {
 			kind:  llvm.AttributeDereferenceableOrNull,
 			value: 19,
 			str:   "dereferenceable_or_null(19)",
+		},
+		{
+			kind:  llvm.AttributeAllocKind,
+			value: llvm.AllocKindAlloc | llvm.AllocKindZeroed,
+			str:   "allockind(\"alloc,zeroed\")",
+		},
+		{
+			kind:  llvm.AttributeAllocSize,
+			value: llvm.EncodeAllocSize(2, 1),
+			str:   "allocsize(2,1)",
+		},
+		{
+			kind:  llvm.AttributeAllocSize,
+			value: llvm.EncodeAllocSize(2, llvm.AllocSizeOneElement),
+			str:   "allocsize(2)",
+		},
+		{
+			kind:  llvm.AttributeUnwindTable,
+			value: llvm.UnwindTableSynchronous,
+			str:   "uwtable(sync)",
 		},
 	} {
 		c := c
@@ -546,6 +583,235 @@ func TestLegacyNoCapture(t *testing.T) {
 	// Test info from an empty set.
 	if info := (llvm.AttributeSet{}).CaptureInfo(); info != noCaptureInfo {
 		t.Errorf("unexpected info from empty set: %q", info)
+	}
+}
+
+func TestMemoryEffects(t *testing.T) {
+	if llvm.VersionMajor < 16 {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	testMemoryEffects(t, []memoryEffectsTest{
+		// Test basic access constraints to all locations.
+		{
+			effects:    llvm.MemoryEffects{},
+			infoStr:    "readwrite",
+			setStr:     "",
+			setEffects: llvm.MemoryEffects{},
+		},
+		{
+			effects:    llvm.MemoryAccessNoWrite.All(),
+			infoStr:    "read",
+			setStr:     "memory(read)",
+			setEffects: llvm.MemoryAccessNoWrite.All(),
+		},
+		{
+			effects:    llvm.MemoryAccessNoRead.All(),
+			infoStr:    "write",
+			setStr:     "memory(write)",
+			setEffects: llvm.MemoryAccessNoRead.All(),
+		},
+		{
+			effects:    llvm.MemoryAccessNone.All(),
+			infoStr:    "none",
+			setStr:     "memory(none)",
+			setEffects: llvm.MemoryAccessNone.All(),
+		},
+
+		// Test access to only specific locations.
+		{
+			effects:    llvm.MemoryAccessAny.Only(llvm.MemoryLocationArguments),
+			infoStr:    "argmem: readwrite",
+			setStr:     "memory(argmem: readwrite)",
+			setEffects: llvm.MemoryAccessAny.Only(llvm.MemoryLocationArguments),
+		},
+		{
+			effects:    llvm.MemoryAccessAny.Only(llvm.MemoryLocationInaccessible),
+			infoStr:    "inaccessiblemem: readwrite",
+			setStr:     "memory(inaccessiblemem: readwrite)",
+			setEffects: llvm.MemoryAccessAny.Only(llvm.MemoryLocationInaccessible),
+		},
+		// errnomem must be tested seperately behind a version check
+
+		// Test access to multiple locations.
+		{
+			effects: llvm.MemoryAccessNoRead.Only(llvm.MemoryLocationArguments).
+				Union(llvm.MemoryAccessNoWrite.Only(llvm.MemoryLocationInaccessible)),
+			infoStr: "argmem: write, inaccessiblemem: read",
+			setStr:  "memory(argmem: write, inaccessiblemem: read)",
+			setEffects: llvm.MemoryAccessNoRead.Only(llvm.MemoryLocationArguments).
+				Union(llvm.MemoryAccessNoWrite.Only(llvm.MemoryLocationInaccessible)),
+		},
+
+		// Test access to all except a single location.
+		{
+			effects:    llvm.MemoryEffects{}.Intersect(llvm.MemoryAccessNone.At(llvm.MemoryLocationArguments)),
+			infoStr:    "readwrite, argmem: none",
+			setStr:     "memory(readwrite, argmem: none)",
+			setEffects: llvm.MemoryEffects{}.Intersect(llvm.MemoryAccessNone.At(llvm.MemoryLocationArguments)),
+		},
+	})
+
+	// Test errnomem.
+	t.Run("errnomem: readwrite", func(t *testing.T) {
+		if llvm.VersionMajor < 21 {
+			t.Skip()
+		}
+
+		memoryEffectsTest{
+			effects:    llvm.MemoryAccessAny.Only(llvm.MemoryLocationErrno),
+			infoStr:    "errnomem: readwrite",
+			setStr:     "memory(errnomem: readwrite)",
+			setEffects: llvm.MemoryAccessAny.Only(llvm.MemoryLocationErrno),
+		}.run(t)
+	})
+	t.Run("errnomem: readwrite compat", func(t *testing.T) {
+		if llvm.VersionMajor >= 21 {
+			t.Skip()
+		}
+
+		// The errnomem effects should be merged into/from the "other" location.
+		memoryEffectsTest{
+			effects: llvm.MemoryAccessAny.Only(llvm.MemoryLocationErrno),
+			infoStr: "errnomem: readwrite",
+			setStr:  "memory(readwrite, argmem: none, inaccessiblemem: none)",
+			setEffects: llvm.MemoryAccessAny.Only(llvm.MemoryLocationErrno).
+				Union(llvm.MemoryAccessAny.Only(llvm.MemoryLocationOther)),
+		}.run(t)
+	})
+}
+
+func TestMemoryEffectsLegacy(t *testing.T) {
+	// TODO: remove this test when we drop LLVM 15 support.
+	// TODO: set up LLVM 15 so I can run this test.
+	if llvm.VersionMajor >= 16 {
+		t.Skip()
+	}
+
+	t.Parallel()
+
+	testMemoryEffects(t, []memoryEffectsTest{
+		// Test basic access constraints to all locations.
+		{
+			effects:    llvm.MemoryEffects{},
+			infoStr:    "readwrite",
+			setStr:     "",
+			setEffects: llvm.MemoryEffects{},
+		},
+		{
+			effects:    llvm.MemoryAccessNoWrite.All(),
+			infoStr:    "read",
+			setStr:     "readonly",
+			setEffects: llvm.MemoryAccessNoWrite.All(),
+		},
+		{
+			effects:    llvm.MemoryAccessNoRead.All(),
+			infoStr:    "write",
+			setStr:     "writeonly",
+			setEffects: llvm.MemoryAccessNoRead.All(),
+		},
+		{
+			effects:    llvm.MemoryAccessNone.All(),
+			infoStr:    "none",
+			setStr:     "readnone",
+			setEffects: llvm.MemoryAccessNone.All(),
+		},
+
+		// Test access to only specific locations.
+		{
+			effects:    llvm.MemoryAccessAny.Only(llvm.MemoryLocationArguments),
+			infoStr:    "argmem: readwrite",
+			setStr:     "argmemonly",
+			setEffects: llvm.MemoryAccessAny.Only(llvm.MemoryLocationArguments),
+		},
+		{
+			effects:    llvm.MemoryAccessAny.Only(llvm.MemoryLocationInaccessible),
+			infoStr:    "inaccessiblemem: readwrite",
+			setStr:     "inaccessiblememonly",
+			setEffects: llvm.MemoryAccessAny.Only(llvm.MemoryLocationInaccessible),
+		},
+		{
+			effects: llvm.MemoryAccessAny.Only(llvm.MemoryLocationArguments).
+				Union(llvm.MemoryAccessAny.Only(llvm.MemoryLocationInaccessible)),
+			infoStr:    "argmem: readwrite, inaccessiblemem: readwrite",
+			setStr:     "inaccessiblemem_or_argmemonly",
+			setEffects: llvm.MemoryAccessAny.Only(llvm.MemoryLocationInaccessible),
+		},
+
+		// Test combinations of constraints
+		{
+			effects:    llvm.MemoryAccessNoRead.Only(llvm.MemoryLocationArguments),
+			infoStr:    "argmem: write",
+			setStr:     "argmemonly writeonly",
+			setEffects: llvm.MemoryAccessNoRead.Only(llvm.MemoryLocationArguments),
+		},
+		{
+			effects:    llvm.MemoryAccessNoWrite.Only(llvm.MemoryLocationInaccessible),
+			infoStr:    "inaccessiblemem: readonly",
+			setStr:     "inaccessiblememonly readonly",
+			setEffects: llvm.MemoryAccessNoWrite.Only(llvm.MemoryLocationInaccessible),
+		},
+		{
+			effects: llvm.MemoryAccessNoRead.Only(llvm.MemoryLocationArguments).
+				Union(llvm.MemoryAccessNoWrite.Only(llvm.MemoryLocationInaccessible)),
+			infoStr: "argmem: write, inaccessiblemem: readonly",
+			setStr:  "inaccessiblemem_or_argmemonly",
+			setEffects: llvm.MemoryAccessAny.Only(llvm.MemoryLocationArguments).
+				Union(llvm.MemoryAccessAny.Only(llvm.MemoryLocationInaccessible)),
+		},
+		{
+			effects: llvm.MemoryAccessNone.Only(llvm.MemoryLocationArguments).
+				Union(llvm.MemoryAccessNoRead.Only(llvm.MemoryLocationErrno)),
+			infoStr:    "argmem: none, errnomem: write",
+			setStr:     "writeonly",
+			setEffects: llvm.MemoryAccessNoRead.All(),
+		},
+		{
+			effects: llvm.MemoryAccessNoWrite.Only(llvm.MemoryLocationArguments).
+				Union(llvm.MemoryAccessNoRead.Only(llvm.MemoryLocationErrno)),
+			infoStr:    "argmem: read, errnomem: write",
+			setStr:     "",
+			setEffects: llvm.MemoryEffects{},
+		},
+	})
+}
+
+type memoryEffectsTest struct {
+	effects    llvm.MemoryEffects
+	infoStr    string
+	setStr     string
+	setEffects llvm.MemoryEffects
+}
+
+func (c memoryEffectsTest) run(t *testing.T) {
+	t.Parallel()
+
+	// Test stringification.
+	if str := c.effects.String(); str != c.infoStr {
+		t.Errorf("unexpected string of effects: %q", str)
+	}
+
+	// Create a context to test with.
+	ctx := llvm.CreateContext()
+	defer ctx.Destroy()
+
+	// Create the attribute set.
+	set := ctx.MemoryEffects(c.effects)
+	if setStr := set.String(); setStr != c.setStr {
+		t.Errorf("expected set %q but got %q", c.setStr, setStr)
+	}
+
+	// Read the effects back.
+	if setEffects := set.MemoryEffects(); setEffects != c.setEffects {
+		t.Errorf("expected effects %q, but got %q", c.setEffects, setEffects)
+	}
+}
+
+func testMemoryEffects(t *testing.T, cases []memoryEffectsTest) {
+	for _, c := range cases {
+		t.Run(c.infoStr, c.run)
 	}
 }
 

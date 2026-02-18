@@ -172,6 +172,24 @@ typedef struct {
 } LLVMGoCaptureInfo;
 LLVMGoAttributeSetRef LLVMGoCreateCaptureAttributes(LLVMContextRef ctx, LLVMGoCaptureInfo info);
 LLVMGoCaptureInfo LLVMGoGetCaptureInfo(LLVMGoAttributeSetRef attrs);
+typedef enum {
+	LLVMGoMemoryAccessAny = 0,
+	LLVMGoMemoryAccessNoRead = 1 << 0,
+	LLVMGoMemoryAccessNoWrite = 1 << 1,
+	LLVMGoMemoryAccessNone = LLVMGoMemoryAccessNoRead | LLVMGoMemoryAccessNoWrite,
+} LLVMGoMemoryAccessFlags;
+#define LLVMGoMemoryAccessFlagsBits 2
+typedef enum {
+	LLVMGoMemoryLocationOther,
+	LLVMGoMemoryLocationArguments,
+	LLVMGoMemoryLocationInaccessible,
+	LLVMGoMemoryLocationErrno,
+	// TODO: add target_mem* when we add support for LLVM 22 (widening LLVMGoMemoryEffectsMask)
+} LLVMGoMemoryLocation;
+#define LLVMGoMemoryEffectsBroadcast 0x55
+typedef uint8_t LLVMGoMemoryEffectsMask;
+LLVMGoAttributeSetRef LLVMGoCreateMemoryEffectsAttributes(LLVMContextRef ctx, LLVMGoMemoryEffectsMask mask);
+LLVMGoMemoryEffectsMask LLVMGoGetMemoryEffects(LLVMGoAttributeSetRef set);
 // Attribute lists cannot be passed directly.
 // The context instead owns opaque pointers.
 LLVMGoAttributeListRef LLVMGoAttributeListCreate(
