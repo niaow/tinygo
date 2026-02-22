@@ -143,6 +143,12 @@ func (elemTy Type) ConstArray(elements ...Constant) Constant {
 	)}}
 }
 
+// ConstString creates a byte array constant containing the provided string.
+// NOTE: This is just a convenience wrapper for ConstIntArray.
+func (ctx Context) ConstString(str string) Constant {
+	return ConstIntArray(ctx, unsafe.Slice(unsafe.StringData(str), len(str)))
+}
+
 // ConstIntArray creates an array constant from a slice of integers.
 // The memory is copied to a flat buffer owned by LLVM instead of converting each element to a seperate constant.
 // NOTE: This cannot be a method because type parameters are not allowed.

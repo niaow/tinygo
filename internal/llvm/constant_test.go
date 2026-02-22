@@ -225,15 +225,15 @@ func TestConstArray(t *testing.T) {
 	}
 }
 
-func TestConstIntArrayString(t *testing.T) {
+func TestConstString(t *testing.T) {
 	t.Parallel()
 
 	// Create a context to test with.
 	ctx := llvm.CreateContext()
 	defer ctx.Destroy()
 
-	// Convert a string to an integer array constant.
-	arr := llvm.ConstIntArray(ctx, []byte("abc"))
+	// Convert a string to a byte array constant.
+	arr := ctx.ConstString("abc")
 
 	// Test stringification.
 	if str := arr.String(); str != "[3 x i8] c\"abc\"" {

@@ -18,6 +18,11 @@ typedef struct {
 // dst is a pointer to a Go string variable.
 void goCloneString(void* dst, LLVMGoStringRef src);
 
+// Attribute sets cannot be passed directly.
+// The context instead owns opaque pointers.
+typedef struct LLVMGoOpaqueAttributeSet *LLVMGoAttributeSetRef;
+typedef struct LLVMGoOpaqueAttributeList *LLVMGoAttributeListRef;
+
 // Contexts
 LLVMContextRef LLVMGoContextCreate();
 void LLVMGoContextDestroy(LLVMContextRef ctx);
@@ -74,9 +79,70 @@ LLVMModuleRef LLVMGoNewModule(
 	LLVMGoStringRef triple,
 	LLVMTargetDataRef dataLayout
 );
-
-// LLVM's c bindings have an equivalent API, but not until LLVM 20.
+// LLVM's C bindings have an equivalent API, but not until LLVM 20.
 LLVMValueRef LLVMGoGetNamedValue(LLVMModuleRef mod, LLVMGoStringRef str);
+typedef enum {
+	LLVMGoLinkageExternal,
+	LLVMGoLinkageAvailableExternally,
+	LLVMGoLinkageOnceAny,
+	LLVMGoLinkageOnceODR,
+	LLVMGoLinkageWeakAny,
+	LLVMGoLinkageWeakODR,
+	LLVMGoLinkageAppending,
+	LLVMGoLinkageInternal,
+	LLVMGoLinkagePrivate,
+	LLVMGoLinkageExternalWeak,
+	LLVMGoLinkageCommon,
+} LLVMGoLinkage;
+typedef enum {
+	LLVMGoUnnamedAddrUnique,
+	LLVMGoUnnamedAddrLocal,
+	LLVMGoUnnamedAddrGlobal,
+} LLVMGoUnnamedAddr;
+typedef enum {
+	LLVMGoVisibilityDefault,
+	LLVMGoVisibilityHidden,
+	LLVMGoVisibilityProtected,
+} LLVMGoVisibility;
+typedef enum {
+	LLVMGoDLLStorageDefault,
+	LLVMGoDLLStorageImport,
+	LLVMGoDLLStorageExport,
+} LLVMGoDLLStorage;
+typedef struct {
+	LLVMGoLinkage linkage;
+	LLVMGoUnnamedAddr unnamedAddr;
+	LLVMGoVisibility visibility;
+	LLVMGoDLLStorage dllStorage;
+	bool isDSOLocal;
+} LLVMGoLinkConfig;
+typedef enum {
+	LLVMGoTLSNone,
+	LLVMGoTLSGeneralDynamic,
+	LLVMGoTLSLocalDynamic,
+	LLVMGoTLSInitialExec,
+	LLVMGoTLSLocalExec,
+} LLVMGoTLS;
+typedef struct {
+	bool isConstant;
+	unsigned addrSpace;
+	LLVMGoTLS tls;
+	LLVMGoLinkConfig link;
+	LLVMGoAttributeSetRef attrs;
+	bool externallyInitialized;
+} LLVMGoVariableOptions;
+LLVMValueRef LLVMGoCreateGlobal(
+	LLVMModuleRef mod,
+	LLVMGoStringRef name,
+	LLVMValueRef initializer,
+	LLVMGoVariableOptions options
+);
+LLVMValueRef LLVMGoCreateExternalGlobal(
+	LLVMModuleRef mod,
+	LLVMGoStringRef name,
+	LLVMTypeRef type,
+	LLVMGoVariableOptions options
+);
 
 // NOTE: LLVMCreateStringAttribute exists, but it uses unsigned int instead of size_t for length.
 // (cont): Use our own function to avoid bizzarre overflow edge-cases.
@@ -121,10 +187,6 @@ typedef struct {
 	const uint64_t* upper;
 } LLVMGoConstRange;
 LLVMGoConstRange LLVMGoAttributeRangeValue(LLVMAttributeRef attr);
-// Attribute sets cannot be passed directly.
-// The context instead owns opaque pointers.
-typedef struct LLVMGoOpaqueAttributeSet *LLVMGoAttributeSetRef;
-typedef struct LLVMGoOpaqueAttributeList *LLVMGoAttributeListRef;
 LLVMGoAttributeSetRef LLVMGoAttributeSetCreate(
 	LLVMContextRef ctx,
 	LLVMAttributeRef* attrs,
@@ -871,7 +933,8 @@ LLVMValueRef LLVMGoCreateFieldPointer(
 
 // Stringification
 void LLVMGoTypeString(void* dst, LLVMTypeRef src);
-void LLVMGoValueString(void* dst, LLVMValueRef src);
+void LLVMGoValueShortString(void* dst, LLVMValueRef src);
+void LLVMGoValueLongString(void* dst, LLVMValueRef src);
 void LLVMGoAttributeString(void* dst, LLVMAttributeRef src);
 void LLVMGoAttributeSetString(void* dst, LLVMGoAttributeSetRef src);
 void LLVMGoAttributeListString(void* dst, LLVMGoAttributeListRef src);
