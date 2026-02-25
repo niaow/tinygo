@@ -151,6 +151,16 @@ func TestGlobal(t *testing.T) {
 			if init, ok := global.GetInitializer(); ok {
 				t.Errorf("unexpected initializer %s", init)
 			}
+
+			// Read the link config back.
+			if link := global.LinkInfo(); link != g.options.Link {
+				t.Error("unexpected link info:", link)
+			}
+
+			// Read the options back.
+			if options := global.Options(); options != g.options {
+				t.Error("unexpected options:", options)
+			}
 		})
 	}
 
@@ -169,4 +179,122 @@ const globalsModStr = `
 @external = external global ptr
 
 attributes #0 = { "key"="value" }
+`
+
+func TestFunc(t *testing.T) {
+	t.Parallel()
+
+	// Create a context to test with.
+	ctx := llvm.CreateContext()
+	defer ctx.Destroy()
+
+	// Create a module.
+	mod := ctx.CreateModule("", "", llvm.DataLayout{})
+	defer mod.Destroy()
+
+	// Create function definitions.
+	for _, f := range []struct {
+		name      string
+		signature llvm.Signature
+		link      llvm.LinkConfig
+		str       string
+	}{
+		{
+			name: "plain",
+			signature: llvm.Signature{
+				Type: ctx.Function(ctx.Void(), false),
+			},
+			str: "declare void @plain()",
+		},
+		{
+			name: "mulWide",
+			signature: llvm.Signature{
+				Type:       ctx.Function(ctx.Int(64), false, ctx.Int(32), ctx.Int(32)),
+				Convention: llvm.CallingConventionFast,
+				Attributes: ctx.AttributeList(
+					ctx.AttributeSet(
+						ctx.EnumAttribute(llvm.AttributeInlineHint),
+						ctx.EnumAttribute(llvm.AttributeNoUnwind),
+					),
+					ctx.AttributeSet(ctx.EnumAttribute(llvm.AttributeNoUndef)),
+					ctx.AttributeSet(ctx.EnumAttribute(llvm.AttributeNoUndef)),
+					ctx.AttributeSet(ctx.EnumAttribute(llvm.AttributeNoUndef)),
+				),
+			},
+			link: llvm.LinkConfig{
+				Linkage:     llvm.LinkageInternal,
+				UnnamedAddr: llvm.UnnamedAddrGlobal,
+				DSOLocal:    true,
+			},
+			str: "; Function Attrs: inlinehint nounwind\n" +
+				"declare internal fastcc noundef i64 @mulWide(i32 noundef, i32 noundef) unnamed_addr #0",
+		},
+		{
+			name: "ack",
+			signature: llvm.Signature{
+				Type:       ctx.Function(ctx.Int(64), false, ctx.Int(64), ctx.Int(64)),
+				Convention: llvm.CallingConventionTail,
+			},
+			link: llvm.LinkConfig{
+				Linkage:     llvm.LinkageInternal,
+				UnnamedAddr: llvm.UnnamedAddrGlobal,
+				DSOLocal:    true,
+			},
+			str: "declare internal tailcc i64 @ack(i64, i64) unnamed_addr",
+		},
+		{
+			name: "printf",
+			signature: llvm.Signature{
+				Type: ctx.Function(ctx.Int(32), true, ctx.Pointer(0)),
+			},
+			link: llvm.LinkConfig{
+				UnnamedAddr: llvm.UnnamedAddrLocal,
+				DLLStorage:  llvm.DLLStorageImport,
+			},
+			str: "declare dllimport i32 @printf(ptr, ...) local_unnamed_addr",
+		},
+	} {
+		t.Run(f.name, func(t *testing.T) {
+			// Create the function declaration.
+			fn := mod.CreateFunction(f.name, f.signature, f.link)
+
+			// Stringify the function declaration.
+			if str := fn.LongString(); str != f.str {
+				t.Errorf("unexpected string of global:\n%s", str)
+			}
+
+			// The contained type should match the signature type.
+			if cty := fn.ContainedType(); cty != f.signature.Type {
+				t.Error("unexpected contained type:", cty)
+			}
+
+			// Read the signature back.
+			if sig := fn.Signature(); sig != f.signature {
+				t.Error("unexpected signature:", sig)
+			}
+
+			// Read the link config back.
+			if link := fn.LinkInfo(); link != f.link {
+				t.Error("unexpected link info:", link)
+			}
+		})
+	}
+
+	// Test stringification of the module.
+	if str := mod.String(); str != fnModStr {
+		t.Errorf("unexpected module string:\n%s", str)
+	}
+}
+
+const fnModStr = `
+declare void @plain()
+
+; Function Attrs: inlinehint nounwind
+declare internal fastcc noundef i64 @mulWide(i32 noundef, i32 noundef) unnamed_addr #0
+
+declare internal tailcc i64 @ack(i64, i64) unnamed_addr
+
+declare dllimport i32 @printf(ptr, ...) local_unnamed_addr
+
+attributes #0 = { inlinehint nounwind }
 `

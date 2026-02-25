@@ -81,6 +81,8 @@ LLVMModuleRef LLVMGoNewModule(
 );
 // LLVM's C bindings have an equivalent API, but not until LLVM 20.
 LLVMValueRef LLVMGoGetNamedValue(LLVMModuleRef mod, LLVMGoStringRef str);
+// LLVMGoLinkage must be kept exactly in sync with GlobalValue::LinkageTypes.
+// *LLVMLinkage* is not, and cannot be safely converted.
 typedef enum {
 	LLVMGoLinkageExternal,
 	LLVMGoLinkageAvailableExternally,
@@ -94,39 +96,17 @@ typedef enum {
 	LLVMGoLinkageExternalWeak,
 	LLVMGoLinkageCommon,
 } LLVMGoLinkage;
-typedef enum {
-	LLVMGoUnnamedAddrUnique,
-	LLVMGoUnnamedAddrLocal,
-	LLVMGoUnnamedAddrGlobal,
-} LLVMGoUnnamedAddr;
-typedef enum {
-	LLVMGoVisibilityDefault,
-	LLVMGoVisibilityHidden,
-	LLVMGoVisibilityProtected,
-} LLVMGoVisibility;
-typedef enum {
-	LLVMGoDLLStorageDefault,
-	LLVMGoDLLStorageImport,
-	LLVMGoDLLStorageExport,
-} LLVMGoDLLStorage;
 typedef struct {
 	LLVMGoLinkage linkage;
-	LLVMGoUnnamedAddr unnamedAddr;
-	LLVMGoVisibility visibility;
-	LLVMGoDLLStorage dllStorage;
+	LLVMUnnamedAddr unnamedAddr;
+	LLVMVisibility visibility;
+	LLVMDLLStorageClass dllStorage;
 	bool isDSOLocal;
 } LLVMGoLinkConfig;
-typedef enum {
-	LLVMGoTLSNone,
-	LLVMGoTLSGeneralDynamic,
-	LLVMGoTLSLocalDynamic,
-	LLVMGoTLSInitialExec,
-	LLVMGoTLSLocalExec,
-} LLVMGoTLS;
 typedef struct {
 	bool isConstant;
 	unsigned addrSpace;
-	LLVMGoTLS tls;
+	LLVMThreadLocalMode tls;
 	LLVMGoLinkConfig link;
 	LLVMGoAttributeSetRef attrs;
 	bool externallyInitialized;
@@ -143,6 +123,21 @@ LLVMValueRef LLVMGoCreateExternalGlobal(
 	LLVMTypeRef type,
 	LLVMGoVariableOptions options
 );
+typedef struct {
+	LLVMTypeRef ty;
+	unsigned conv;
+	unsigned addrSpace;
+	LLVMGoAttributeListRef attrs;
+} LLVMGoSignature;
+LLVMValueRef LLVMGoCreateFunction(
+	LLVMModuleRef mod,
+	LLVMGoStringRef name,
+	LLVMGoSignature signature,
+	LLVMGoLinkConfig link
+);
+LLVMGoLinkConfig LLVMGoLinkInfo(LLVMValueRef v);
+LLVMGoVariableOptions LLVMGoGetVariableOptions(LLVMValueRef var);
+LLVMGoSignature LLVMGoFunctionSignature(LLVMValueRef fn);
 
 // NOTE: LLVMCreateStringAttribute exists, but it uses unsigned int instead of size_t for length.
 // (cont): Use our own function to avoid bizzarre overflow edge-cases.

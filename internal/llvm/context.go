@@ -55,4 +55,12 @@ func refAsBytes(ref C.LLVMGoStringRef) []byte {
 	)
 }
 
+func toLLVMBool(b bool) C.LLVMBool {
+	var v C.LLVMBool
+	if b {
+		v = 1
+	}
+	return v
+}
+
 const VersionMajor = C.LLVM_VERSION_MAJOR

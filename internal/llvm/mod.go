@@ -108,33 +108,48 @@ func (options VariableOptions) toC() C.LLVMGoVariableOptions {
 	return C.LLVMGoVariableOptions{
 		isConstant:            C.bool(options.Constant),
 		addrSpace:             C.unsigned(options.AddrSpace),
-		tls:                   C.LLVMGoTLS(options.TLS),
+		tls:                   C.LLVMThreadLocalMode(options.TLS),
 		link:                  options.Link.toC(),
 		attrs:                 options.Attributes.ptr,
 		externallyInitialized: C.bool(options.ExternallyInitialized),
 	}
 }
 
+func (v GlobalVariable) Options() VariableOptions {
+	return variableOptionsFromC(C.LLVMGoGetVariableOptions(v.ptr))
+}
+
+func variableOptionsFromC(src C.LLVMGoVariableOptions) VariableOptions {
+	return VariableOptions{
+		Constant:              bool(src.isConstant),
+		AddrSpace:             uint32(src.addrSpace),
+		TLS:                   TLSMode(src.tls),
+		Link:                  linkConfigFromC(src.link),
+		Attributes:            AttributeSet{src.attrs},
+		ExternallyInitialized: bool(src.externallyInitialized),
+	}
+}
+
 // TLSMode specifies the TLS model of a variable.
 // The zero value is TLSNone which specifies that the variable is not thread-local.
-type TLSMode C.LLVMGoTLS
+type TLSMode C.LLVMThreadLocalMode
 
 const (
 	// TLSNone indicates that this variable is not thread-local.
-	TLSNone TLSMode = C.LLVMGoTLSNone
+	TLSNone TLSMode = C.LLVMNotThreadLocal
 	// TLSGeneralDynamic is the default TLS mode.
 	// It does not assume that any parameters are known at link time.
 	// Use this for thread-local variables which are externally visible.
-	TLSGeneralDynamic TLSMode = C.LLVMGoTLSGeneralDynamic
+	TLSGeneralDynamic TLSMode = C.LLVMGeneralDynamicTLSModel
 	// TLSLocalDynamic is used for TLS variables defined within the current shared object.
 	// The offsets within the module are known at link time, but not the module ID.
-	TLSLocalDynamic TLSMode = C.LLVMGoTLSLocalDynamic
+	TLSLocalDynamic TLSMode = C.LLVMLocalDynamicTLSModel
 	// TLSInitialExec is used for TLS variables defined within the current static object.
 	// The constant offset of the variable is computed by the dynamic linker.
-	TLSInitialExec TLSMode = C.LLVMGoTLSInitialExec
+	TLSInitialExec TLSMode = C.LLVMInitialExecTLSModel
 	// TLSLocalExec is used for TLS variables defined within the current executable (not a library).
 	// The constant offset of the variable is computed at link time.
-	TLSLocalExec TLSMode = C.LLVMGoTLSLocalExec
+	TLSLocalExec TLSMode = C.LLVMLocalExecTLSModel
 )
 
 // String formats the TLS mode as it would be printed in IR.
@@ -168,7 +183,14 @@ func (mod Module) CreateFunction(
 	signature Signature,
 	link LinkConfig,
 ) Function {
-	panic("TODO")
+	var fn Function
+	fn.ptr = C.LLVMGoCreateFunction(
+		mod.ptr,
+		stringRef(name),
+		signature.toC(),
+		link.toC(),
+	)
+	return fn
 }
 
 type Signature struct {
@@ -184,6 +206,28 @@ type Signature struct {
 	// Attributes is a list of attributes for the function/call.
 	// NOTE: ABI attributes must match between the function and the call site.
 	Attributes AttributeList
+}
+
+func (sig Signature) toC() C.LLVMGoSignature {
+	return C.LLVMGoSignature{
+		ty:        sig.Type.ptr,
+		conv:      C.unsigned(sig.Convention),
+		addrSpace: C.unsigned(sig.AddrSpace),
+		attrs:     sig.Attributes.ptr,
+	}
+}
+
+func (fn Function) Signature() Signature {
+	return signatureFromC(C.LLVMGoFunctionSignature(fn.ptr))
+}
+
+func signatureFromC(src C.LLVMGoSignature) Signature {
+	return Signature{
+		Type:       Type{src.ty},
+		Convention: CallingConvention(src.conv),
+		AddrSpace:  uint32(src.addrSpace),
+		Attributes: AttributeList{src.attrs},
+	}
 }
 
 // CallingConvention is used to hold a calling convention ID.
@@ -229,6 +273,20 @@ type LinkConfig struct {
 	DSOLocal bool
 }
 
+func (config LinkConfig) toC() C.LLVMGoLinkConfig {
+	return C.LLVMGoLinkConfig{
+		linkage:     C.LLVMGoLinkage(config.Linkage),
+		unnamedAddr: C.LLVMUnnamedAddr(config.UnnamedAddr),
+		visibility:  C.LLVMVisibility(config.Visibility),
+		dllStorage:  C.LLVMDLLStorageClass(config.DLLStorage),
+		isDSOLocal:  C.bool(config.DSOLocal),
+	}
+}
+
+func (g Global) LinkInfo() LinkConfig {
+	return linkConfigFromC(C.LLVMGoLinkInfo(g.ptr))
+}
+
 func linkConfigFromC(src C.LLVMGoLinkConfig) LinkConfig {
 	return LinkConfig{
 		Linkage:     Linkage(src.linkage),
@@ -236,16 +294,6 @@ func linkConfigFromC(src C.LLVMGoLinkConfig) LinkConfig {
 		Visibility:  Visibility(src.visibility),
 		DLLStorage:  DLLStorage(src.dllStorage),
 		DSOLocal:    bool(src.isDSOLocal),
-	}
-}
-
-func (config LinkConfig) toC() C.LLVMGoLinkConfig {
-	return C.LLVMGoLinkConfig{
-		linkage:     C.LLVMGoLinkage(config.Linkage),
-		unnamedAddr: C.LLVMGoUnnamedAddr(config.UnnamedAddr),
-		visibility:  C.LLVMGoVisibility(config.Visibility),
-		dllStorage:  C.LLVMGoDLLStorage(config.DLLStorage),
-		isDSOLocal:  C.bool(config.DSOLocal),
 	}
 }
 
@@ -309,18 +357,18 @@ var linkageNames = [...]string{
 
 // UnnamedAddr indicates whether the address of a symbol is required to be unique.
 // This is used to determine whether identical symbols can be merged by the linker.
-type UnnamedAddr C.LLVMGoUnnamedAddr
+type UnnamedAddr C.LLVMUnnamedAddr
 
 const (
 	// UnnamedAddrUnique indicates that the current module depends on uniqueness of the symbol address.
 	// This is the default value.
-	UnnamedAddrUnique UnnamedAddr = C.LLVMGoUnnamedAddrUnique
+	UnnamedAddrUnique UnnamedAddr = C.LLVMNoUnnamedAddr
 	// UnnamedAddrLocal indicates that the current module does not depend on uniqueness of the symbol address.
 	// The symbol may be merged if this is the case for all modules that reference it.
-	UnnamedAddrLocal UnnamedAddr = C.LLVMGoUnnamedAddrLocal
+	UnnamedAddrLocal UnnamedAddr = C.LLVMLocalUnnamedAddr
 	// UnnamedAddrGlobal indicates that no module depends on uniqueness of the symbol address.
 	// The symbol may be merged.
-	UnnamedAddrGlobal UnnamedAddr = C.LLVMGoUnnamedAddrGlobal
+	UnnamedAddrGlobal UnnamedAddr = C.LLVMGlobalUnnamedAddr
 )
 
 // String formats the UnnamedAddr as it would be printed in IR.
@@ -335,17 +383,17 @@ var unnamedAddrNames = [...]string{
 }
 
 // Visibility controls how a symbol is treated after linking into the final executable/library.
-type Visibility C.LLVMGoVisibility
+type Visibility C.LLVMVisibility
 
 const (
 	// VisibilityDefault generally permits other executables/libraries to access the symbol.
 	// Exact semantics depend on the executable format.
 	// This is required by LinkageInternal/LinkagePrivate.
-	VisibilityDefault Visibility = C.LLVMGoVisibilityDefault
+	VisibilityDefault Visibility = C.LLVMDefaultVisibility
 	// VisibilityHidden does not permit other executables/libraries to access or override the symbol.
-	VisibilityHidden Visibility = C.LLVMGoVisibilityHidden
+	VisibilityHidden Visibility = C.LLVMHiddenVisibility
 	// VisibilityProtected permits other executables/libraries to access the symbol but not override it.
-	VisibilityProtected Visibility = C.LLVMGoVisibilityProtected
+	VisibilityProtected Visibility = C.LLVMProtectedVisibility
 )
 
 // String formats the visibility as it would be printed in IR (excluding the quotes).
@@ -360,16 +408,16 @@ var visibilityNames = [...]string{
 }
 
 // DLLStorage controls imports/exports for PE/XCOFF libraries.
-type DLLStorage C.LLVMGoDLLStorage
+type DLLStorage C.LLVMDLLStorageClass
 
 const (
 	// DLLStorageDefault does not import or export the symbol.
 	// This is required by LinkageInternal/LinkagePrivate.
-	DLLStorageDefault DLLStorage = C.LLVMGoDLLStorageDefault
+	DLLStorageDefault DLLStorage = C.LLVMDefaultStorageClass
 	// DLLStorageImport imports the symbol from a DLL.
-	DLLStorageImport DLLStorage = C.LLVMGoDLLStorageImport
+	DLLStorageImport DLLStorage = C.LLVMDLLImportStorageClass
 	// DLLStorageExports the symbol from the current DLL.
-	DLLStorageExport DLLStorage = C.LLVMGoDLLStorageExport
+	DLLStorageExport DLLStorage = C.LLVMDLLExportStorageClass
 )
 
 // String formats the DLLStorage as it would be printed in IR.

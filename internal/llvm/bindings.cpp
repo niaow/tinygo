@@ -75,9 +75,42 @@ LLVMContextRef LLVMGoContextCreate() {
 void LLVMGoContextDestroy(LLVMContextRef ctx) {
 	delete goUnwrap(ctx);
 }
+static LLVMGoAttributeSetRef goWrap(LLVMContextRef ctx, AttributeSet set) {
+	// Map the empty set to null.
+	if (set == AttributeSet()) {
+		return nullptr;
+	}
+
+	// Find or create an entry in the map.
+	std::unique_ptr<AttributeSet> &slot = goUnwrap(ctx)->attrSetRefs[set];
+	if (!slot) {
+		// Populate the new entry.
+		slot.reset(new AttributeSet(set));
+	}
+
+	return reinterpret_cast<LLVMGoAttributeSetRef>(slot.get());
+}
 static AttributeSet unwrap(LLVMGoAttributeSetRef ref) {
 	auto ptr = reinterpret_cast<AttributeSet*>(ref);
 	return ptr != nullptr ? *ptr : AttributeSet();
+}
+static LLVMGoAttributeListRef goWrap(LLVMContextRef ctx, AttributeList list) {
+	// Map the empty list value to null.
+	if (list == AttributeList()) {
+		return nullptr;
+	}
+
+	// Find or create an entry in the map.
+	std::unique_ptr<LLVMGoAttributeList> &slot = goUnwrap(ctx)->attrListRefs[list];
+	if (!slot) {
+		// Populate the new entry.
+		slot.reset(new LLVMGoAttributeList({list, ctx}));
+	}
+
+	return reinterpret_cast<LLVMGoAttributeListRef>(slot.get());
+}
+static LLVMGoAttributeList* unwrap(LLVMGoAttributeListRef ref) {
+	return reinterpret_cast<LLVMGoAttributeList*>(ref);
 }
 
 // Target information
@@ -173,41 +206,24 @@ LLVMModuleRef LLVMGoNewModule(
 LLVMValueRef LLVMGoGetNamedValue(LLVMModuleRef mod, LLVMGoStringRef str) {
 	return wrap(unwrap(mod)->getNamedValue(toStringRef(str)));
 }
-static const GlobalValue::LinkageTypes LLVMGoLinkageLUT[] = {
-	[LLVMGoLinkageExternal] = GlobalValue::ExternalLinkage,
-	[LLVMGoLinkageAvailableExternally] = GlobalValue::AvailableExternallyLinkage,
-	[LLVMGoLinkageOnceAny] = GlobalValue::LinkOnceAnyLinkage,
-	[LLVMGoLinkageOnceODR] = GlobalValue::LinkOnceODRLinkage,
-	[LLVMGoLinkageWeakAny] = GlobalValue::WeakAnyLinkage,
-	[LLVMGoLinkageWeakODR] = GlobalValue::WeakODRLinkage,
-	[LLVMGoLinkageAppending] = GlobalValue::AppendingLinkage,
-	[LLVMGoLinkageInternal] = GlobalValue::InternalLinkage,
-	[LLVMGoLinkagePrivate] = GlobalValue::PrivateLinkage,
-	[LLVMGoLinkageExternalWeak] = GlobalValue::ExternalWeakLinkage,
-	[LLVMGoLinkageCommon] = GlobalValue::CommonLinkage,
-};
-static const GlobalValue::UnnamedAddr LLVMGoUnnamedAddrLUT[] = {
-	[LLVMGoUnnamedAddrUnique] = GlobalValue::UnnamedAddr::None,
-	[LLVMGoUnnamedAddrLocal] = GlobalValue::UnnamedAddr::Local,
-	[LLVMGoUnnamedAddrGlobal] = GlobalValue::UnnamedAddr::Global,
-};
-static const GlobalValue::VisibilityTypes LLVMGoVisibilityLUT[] = {
-	[LLVMGoVisibilityDefault] = GlobalValue::DefaultVisibility,
-	[LLVMGoVisibilityHidden] = GlobalValue::HiddenVisibility,
-	[LLVMGoVisibilityProtected] = GlobalValue::ProtectedVisibility,
-};
-static const GlobalValue::DLLStorageClassTypes LLVMGoDLLStorageLUT[] = {
-	[LLVMGoDLLStorageDefault] = GlobalValue::DefaultStorageClass,
-	[LLVMGoDLLStorageImport] = GlobalValue::DLLImportStorageClass,
-	[LLVMGoDLLStorageExport] = GlobalValue::DLLExportStorageClass,
-};
-static const GlobalValue::ThreadLocalMode LLVMGoTLSLUT[] = {
-	[LLVMGoTLSNone] = GlobalValue::NotThreadLocal,
-	[LLVMGoTLSGeneralDynamic] = GlobalValue::GeneralDynamicTLSModel,
-	[LLVMGoTLSLocalDynamic] = GlobalValue::LocalDynamicTLSModel,
-	[LLVMGoTLSInitialExec] = GlobalValue::InitialExecTLSModel,
-	[LLVMGoTLSLocalExec] = GlobalValue::LocalExecTLSModel,
-};
+#define LLVMGoStaticWrap(L, G) \
+	static G wrap(L v) { return static_cast<G>(v); } \
+	static L unwrap(G v) { return static_cast<L>(v); }
+LLVMGoStaticWrap(GlobalValue::LinkageTypes, LLVMGoLinkage)
+LLVMGoStaticWrap(GlobalValue::UnnamedAddr, LLVMUnnamedAddr)
+LLVMGoStaticWrap(GlobalValue::VisibilityTypes, LLVMVisibility)
+LLVMGoStaticWrap(GlobalValue::DLLStorageClassTypes, LLVMDLLStorageClass)
+LLVMGoStaticWrap(GlobalValue::ThreadLocalMode, LLVMThreadLocalMode)
+static LLVMValueRef LLVMGoSetExtraLinkOptions(
+	GlobalValue* dst,
+	LLVMGoLinkConfig src
+) {
+	dst->setUnnamedAddr(unwrap(src.unnamedAddr));
+	dst->setVisibility(unwrap(src.visibility));
+	dst->setDLLStorageClass(unwrap(src.dllStorage));
+	dst->setDSOLocal(src.isDSOLocal);
+	return wrap(dst);
+}
 static LLVMValueRef LLVMGoCreateGlobalInner(
 	LLVMModuleRef mod,
 	LLVMGoStringRef name,
@@ -219,20 +235,16 @@ static LLVMValueRef LLVMGoCreateGlobalInner(
 		*unwrap(mod),
 		type,
 		options.isConstant,
-		LLVMGoLinkageLUT[options.link.linkage],
+		unwrap(options.link.linkage),
 		initializer,
 		toTwine(name),
 		nullptr,
-		LLVMGoTLSLUT[options.tls],
+		unwrap(options.tls),
 		options.addrSpace,
 		options.externallyInitialized
 	);
-	var->setUnnamedAddr(LLVMGoUnnamedAddrLUT[options.link.unnamedAddr]);
-	var->setVisibility(LLVMGoVisibilityLUT[options.link.visibility]);
-	var->setDLLStorageClass(LLVMGoDLLStorageLUT[options.link.dllStorage]);
-	var->setDSOLocal(options.link.isDSOLocal);
 	var->setAttributes(unwrap(options.attrs));
-	return wrap(var);
+	return LLVMGoSetExtraLinkOptions(var, options.link);
 }
 LLVMValueRef LLVMGoCreateGlobal(
 	LLVMModuleRef mod,
@@ -250,6 +262,57 @@ LLVMValueRef LLVMGoCreateExternalGlobal(
 	LLVMGoVariableOptions options
 ) {
 	return LLVMGoCreateGlobalInner(mod, name, unwrap(type), nullptr, options);
+}
+LLVMValueRef LLVMGoCreateFunction(
+	LLVMModuleRef mod,
+	LLVMGoStringRef name,
+	LLVMGoSignature signature,
+	LLVMGoLinkConfig link
+) {
+	Function* fn = Function::Create(
+		unwrap<FunctionType>(signature.ty),
+		unwrap(link.linkage),
+		signature.addrSpace,
+		toTwine(name),
+		unwrap(mod)
+	);
+	fn->setCallingConv(signature.conv);
+	if (signature.attrs != nullptr) {
+		fn->setAttributes(unwrap(signature.attrs)->list);
+	}
+	return LLVMGoSetExtraLinkOptions(fn, link);
+}
+static LLVMGoLinkConfig LLVMGoLinkInfo(GlobalValue* g) {
+	return {
+		.linkage = wrap(g->getLinkage()),
+		.unnamedAddr = wrap(g->getUnnamedAddr()),
+		.visibility = wrap(g->getVisibility()),
+		.dllStorage = wrap(g->getDLLStorageClass()),
+		.isDSOLocal = g->isDSOLocal(),
+	};
+}
+LLVMGoLinkConfig LLVMGoLinkInfo(LLVMValueRef v) {
+	return LLVMGoLinkInfo(unwrap<GlobalValue>(v));
+}
+LLVMGoVariableOptions LLVMGoGetVariableOptions(LLVMValueRef var) {
+	GlobalVariable* v = unwrap<GlobalVariable>(var);
+	return {
+		.isConstant = v->isConstant(),
+		.addrSpace = v->getAddressSpace(),
+		.tls = wrap(v->getThreadLocalMode()),
+		.link = LLVMGoLinkInfo(v),
+		.attrs = goWrap(wrap(&v->getContext()), v->getAttributes()),
+		.externallyInitialized = v->isExternallyInitialized(),
+	};
+}
+LLVMGoSignature LLVMGoFunctionSignature(LLVMValueRef fn) {
+	Function* f = unwrap<Function>(fn);
+	return {
+		.ty = wrap(f->getFunctionType()),
+		.conv = f->getCallingConv(),
+		.addrSpace = f->getAddressSpace(),
+		.attrs = goWrap(wrap(&f->getContext()), f->getAttributes()),
+	};
 }
 
 // Attributes
@@ -366,21 +429,6 @@ LLVMGoConstRange LLVMGoAttributeRangeValue(LLVMAttributeRef attr) {
 #endif
 }
 // Attribute sets
-static LLVMGoAttributeSetRef goWrap(LLVMContextRef ctx, AttributeSet set) {
-	// Map the empty set to null.
-	if (set == AttributeSet()) {
-		return nullptr;
-	}
-
-	// Find or create an entry in the map.
-	std::unique_ptr<AttributeSet> &slot = goUnwrap(ctx)->attrSetRefs[set];
-	if (!slot) {
-		// Populate the new entry.
-		slot.reset(new AttributeSet(set));
-	}
-
-	return reinterpret_cast<LLVMGoAttributeSetRef>(slot.get());
-}
 static LLVMGoAttributeSetRef makeAttrSetRef(LLVMContextRef ctx, const AttrBuilder &builder) {
 	return goWrap(ctx, AttributeSet::get(*unwrap(ctx), builder));
 }
@@ -679,24 +727,6 @@ LLVMGoMemoryEffectsMask LLVMGoGetMemoryEffects(LLVMGoAttributeSetRef set) {
 }
 #endif
 // Attribute lists
-static LLVMGoAttributeList* unwrap(LLVMGoAttributeListRef ref) {
-	return reinterpret_cast<LLVMGoAttributeList*>(ref);
-}
-static LLVMGoAttributeListRef goWrap(LLVMContextRef ctx, AttributeList list) {
-	// Map the empty list value to null.
-	if (list == AttributeList()) {
-		return nullptr;
-	}
-
-	// Find or create an entry in the map.
-	std::unique_ptr<LLVMGoAttributeList> &slot = goUnwrap(ctx)->attrListRefs[list];
-	if (!slot) {
-		// Populate the new entry.
-		slot.reset(new LLVMGoAttributeList({list, ctx}));
-	}
-
-	return reinterpret_cast<LLVMGoAttributeListRef>(slot.get());
-}
 LLVMGoAttributeListRef LLVMGoAttributeListCreate(
 	LLVMContextRef ctx,
 	LLVMGoAttributeSetRef functionAttributes,

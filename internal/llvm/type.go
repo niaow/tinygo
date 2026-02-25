@@ -95,6 +95,23 @@ func (c Context) NamedStruct(name string, elements ...Type) Type {
 	)}
 }
 
+// Function creates a new function type.
+// Identical calls will return the same type.
+func (ctx Context) Function(ret Type, varArgs bool, arguments ...Type) Type {
+	// The total contained type count (including the return) is stored into a C.unsigned.
+	// This means that the maximum number of arguments is 2^32 - 2.
+	if len(arguments) > 1<<32-2 {
+		panic("too many arguments")
+	}
+
+	return Type{C.LLVMFunctionType(
+		ret.ptr,
+		(*C.LLVMTypeRef)(unsafe.Pointer(unsafe.SliceData(arguments))),
+		C.unsigned(len(arguments)),
+		toLLVMBool(varArgs),
+	)}
+}
+
 // Info queries information about a type.
 func (t Type) Info() TypeInfo {
 	return TypeInfo{C.LLVMGoGetTypeInfo(t.ptr)}

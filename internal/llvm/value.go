@@ -5,6 +5,7 @@ package llvm
 */
 import "C"
 import (
+	"strings"
 	"unsafe"
 )
 
@@ -25,7 +26,10 @@ func (v Value) String() string {
 func (v Value) LongString() string {
 	var dst string
 	C.LLVMGoValueLongString(unsafe.Pointer(&dst), v.ptr)
-	return dst
+	// Function declarations contain a trailing newline.
+	// This is inconsistent with everything else, so discard it.
+	// TODO: Is there a better way to do this?
+	return strings.TrimSpace(dst)
 }
 
 // Type returns the type of the value.
