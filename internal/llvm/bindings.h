@@ -931,10 +931,19 @@ LLVMValueRef LLVMGoCreateFieldPointer(
 	LLVMGoStringRef name
 );
 
+// Metadata
+LLVMGoStringRef LLVMGoMetadataString(LLVMMetadataRef md);
+#define LLVMGoMetadataNotANode SIZE_MAX
+size_t LLVMGoMetadataOperandsCount(LLVMMetadataRef md);
+void LLVMGoMetadataOperands(LLVMMetadataRef md, LLVMMetadataRef* dst);
+LLVMValueRef LLVMGoUnwrapMetadataValue(LLVMMetadataRef md);
+
 // Stringification
 void LLVMGoTypeString(void* dst, LLVMTypeRef src);
 void LLVMGoValueShortString(void* dst, LLVMValueRef src);
 void LLVMGoValueLongString(void* dst, LLVMValueRef src);
+void LLVMGoMetadataShortString(void* dst, LLVMMetadataRef src, LLVMModuleRef mod);
+void LLVMGoMetadataLongString(void* dst, LLVMMetadataRef src, LLVMModuleRef mod);
 void LLVMGoAttributeString(void* dst, LLVMAttributeRef src);
 void LLVMGoAttributeSetString(void* dst, LLVMGoAttributeSetRef src);
 void LLVMGoAttributeListString(void* dst, LLVMGoAttributeListRef src);

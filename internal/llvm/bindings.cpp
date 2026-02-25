@@ -2069,6 +2069,36 @@ LLVMValueRef LLVMGoCreateFieldPointer(
 	));
 }
 
+// Metadata
+LLVMGoStringRef LLVMGoMetadataString(LLVMMetadataRef md) {
+	MDString* str = dyn_cast<MDString>(unwrap(md));
+	if (str == nullptr) {
+		return {nullptr, 0};
+	}
+	return fromStringRef(str->getString());
+}
+size_t LLVMGoMetadataOperandsCount(LLVMMetadataRef md) {
+	MDNode* node = dyn_cast<MDNode>(unwrap(md));
+	if (node == nullptr) {
+		return LLVMGoMetadataNotANode;
+	}
+	return node->operands().size();
+}
+void LLVMGoMetadataOperands(LLVMMetadataRef md, LLVMMetadataRef* __restrict dst) {
+	ArrayRef<MDOperand> operands = unwrap<MDNode>(md)->operands();
+	// TODO: verify that the __restrict is sufficient to turn this into a memcpy
+	for (size_t i = 0; i < operands.size(); i++) {
+		dst[i] = wrap(operands[i]);
+	}
+}
+LLVMValueRef LLVMGoUnwrapMetadataValue(LLVMMetadataRef md) {
+	ValueAsMetadata* vmd = dyn_cast<ValueAsMetadata>(unwrap(md));
+	if (vmd == nullptr) {
+		return nullptr;
+	}
+	return wrap(vmd->getValue());
+}
+
 // Stringification
 void LLVMGoTypeString(void* dst, LLVMTypeRef src) {
 	std::string str;
