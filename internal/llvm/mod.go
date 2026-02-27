@@ -444,3 +444,7 @@ func (fn Function) AppendBasicBlock(name string) BasicBlock {
 func (bb BasicBlock) AddAfter(name string) BasicBlock {
 	return BasicBlock{C.LLVMGoAppendBasicBlockAfter(bb.ptr, stringRef(name))}
 }
+
+func (fn Function) Param(idx uint32) Value {
+	return Value{C.LLVMGetParam(fn.ptr, C.unsigned(idx))}
+}

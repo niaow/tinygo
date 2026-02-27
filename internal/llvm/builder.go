@@ -20,6 +20,10 @@ func (ctx Context) Builder() Builder {
 	return Builder{C.LLVMCreateBuilderInContext(ctx.ptr)}
 }
 
+func (b Builder) Destroy() {
+	C.LLVMDisposeBuilder(b.ptr)
+}
+
 // AtEnd moves the insertion point to the end of the basic block.
 func (b Builder) AtEnd(bb BasicBlock) {
 	C.LLVMPositionBuilderAtEnd(b.ptr, bb.ptr)
@@ -393,6 +397,7 @@ func (b Builder) And(x, y Value, name string) Value {
 // This is equivalent to a boolean or when the type is i1.
 // If disjoint ("disjoint" in IR): the result is poisoned if any bits are present in both operands.
 // This is used by some platforms (e.g. x86) to turn shift-or operations into shift-add instructions.
+// BUG: The disjoint flag is discarded until LLVM 21 due to IRBuilder limitations.
 //
 // https://llvm.org/docs/LangRef.html#or-instruction
 func (b Builder) Or(x, y Value, name string, disjoint bool) Value {
@@ -576,6 +581,7 @@ func (b Builder) FloatExtend(v Value, to Type, name string) Value {
 // This inherits the builder's current floating-point configuration.
 //
 // If positive ("nneg" in IR): the result is poisoned if the operand's top bit is set.
+// This allows the uitofp instruction to be rewritten as a sitofp instruction.
 //
 // https://llvm.org/docs/LangRef.html#uitofp-to-instruction
 // https://reviews.llvm.org/D47807
@@ -595,11 +601,9 @@ func (b Builder) UnsignedIntToFloat(v Value, to Type, name string, positive bool
 // Integers are rounded if they cannot be exactly cast.
 // This inherits the builder's current floating-point configuration.
 //
-// If positive ("nneg" in IR): the result is poisoned if the operand's top bit is set.
-//
 // https://llvm.org/docs/LangRef.html#sitofp-to-instruction
 // https://reviews.llvm.org/D47807
-func (b Builder) SignedIntToFloat(v Value, to Type, name string, positive bool) Value {
+func (b Builder) SignedIntToFloat(v Value, to Type, name string) Value {
 	return Value{C.LLVMGoCreateSIToFP(
 		b.ptr,
 		v.ptr,
@@ -637,7 +641,7 @@ func (b Builder) FloatToUnsignedIntSaturating(v Value, to Type, name string) Val
 //
 // https://llvm.org/docs/LangRef.html#llvm-fptosi-sat-intrinsic
 func (b Builder) FloatToSignedIntSaturating(v Value, to Type, name string) Value {
-	return Value{C.LLVMGoCreateFPToUISat(
+	return Value{C.LLVMGoCreateFPToSISat(
 		b.ptr,
 		v.ptr,
 		to.ptr,
@@ -794,6 +798,11 @@ const (
 	// FloatNaN matches if either operand is NaN.
 	FloatNaN FloatComparison = C.LLVMGoFloatNaN
 )
+
+// Not inverts the comparison condition.
+func (fcmp FloatComparison) Not() FloatComparison {
+	return (FloatEqual | FloatGreater | FloatLess | FloatNaN) ^ fcmp
+}
 
 // String formats the comparison operator as it would be printed in IR.
 func (fcmp FloatComparison) String() string {
@@ -1058,7 +1067,7 @@ func (opts CompareAndExchangeOptions) toC() C.LLVMGoCmpXchgOptions {
 //
 // https://llvm.org/docs/LangRef.html#atomicrmw-instruction
 func (b Builder) AtomicRMW(op AtomicOp, ptr, value Value, opts MemOptions, name string) Value {
-	if op.Supported() {
+	if !op.Supported() {
 		panic("unsupported atomic op")
 	}
 	return Value{C.LLVMGoCreateAtomicRMW(
@@ -1160,13 +1169,13 @@ const (
 	// AtomicFloatMaximum ("fmaximum" in IR) uses llvm.maximum.* with the old and provided floats.
 	// If one of the floats is NaN, the value is set to NaN.
 	//
-	// This requires LLVM 20 or newer.
+	// This requires LLVM 21 or newer.
 	AtomicFloatMaximum AtomicOp = C.LLVMGoAtomicRMWOpFMaximum
 
 	// AtomicFloatMinimum ("fminimum" in IR) uses llvm.minimum.* with the old and provided floats.
 	// If one of the floats is NaN, the value is set to NaN.
 	//
-	// This requires LLVM 20 or newer.
+	// This requires LLVM 21 or newer.
 	AtomicFloatMinimum AtomicOp = C.LLVMGoAtomicRMWOpFMinimum
 )
 
@@ -1240,7 +1249,7 @@ type Alignment uint64
 const ImplicitAlignment Alignment = 0
 
 func (align Alignment) toC() C.uint64_t {
-	if align&(align-1) != 0 || align > 1<<32 {
+	if align&(align-1) != 0 || align >= 1<<32 {
 		panic("invalid alignment")
 	}
 	return C.uint64_t(align)
@@ -1272,12 +1281,12 @@ const (
 	// https://llvm.org/docs/Atomics.html#unordered
 	MemOrderUnordered MemOrder = C.LLVMGoMemOrderUnordered
 
-	// MemOrdrerMonotonic performs memory access atomically, but does not synchronize.
+	// MemOrderMonotonic performs memory access atomically, but does not synchronize.
 	// This matches C++'s std::mem_order_relaxed.
 	//
 	// https://llvm.org/docs/Atomics.html#monotonic
 	// https://en.cppreference.com/w/cpp/atomic/memory_order.html#Relaxed_ordering
-	MemOrdrerMonotonic MemOrder = C.LLVMGoMemOrderMonotonic
+	MemOrderMonotonic MemOrder = C.LLVMGoMemOrderMonotonic
 
 	// MemOrderAcquire performs memory access atomically and synchronizes with MemOrderRelease operations.
 	// This intended for use when acquiring locks and matches C++'s std::mem_order_release.
@@ -1333,31 +1342,33 @@ func (b Builder) MemSet(dst, value, len Value, align Alignment, volatile bool) {
 // This works between any pair of address spaces.
 //
 // https://llvm.org/docs/LangRef.html#llvm-memcpy-intrinsic
-func (b Builder) MemCopy(dst Value, dstAlign Alignment, src Value, srcAlign Alignment, len Value, volatile bool) {
+func (b Builder) MemCopy(
+	dst Value, dstAlign Alignment,
+	src Value, srcAlign Alignment,
+	len Value, volatile bool,
+) {
 	C.LLVMGoCreateMemCpy(
 		b.ptr,
-		dst.ptr,
-		dstAlign.toC(),
-		src.ptr,
-		srcAlign.toC(),
-		len.ptr,
-		C.bool(volatile),
+		dst.ptr, dstAlign.toC(),
+		src.ptr, srcAlign.toC(),
+		len.ptr, C.bool(volatile),
 	)
 }
 
-// MemMove copies memory between buffers whichg may overlap.
+// MemMove copies memory between buffers which may overlap.
 // This works between any pair of address spaces.
 //
 // https://llvm.org/docs/LangRef.html#llvm-memmove-intrinsic
-func (b Builder) MemMove(dst Value, dstAlign Alignment, src Value, srcAlign Alignment, len Value, volatile bool) {
+func (b Builder) MemMove(
+	dst Value, dstAlign Alignment,
+	src Value, srcAlign Alignment,
+	len Value, volatile bool,
+) {
 	C.LLVMGoCreateMemMove(
 		b.ptr,
-		dst.ptr,
-		dstAlign.toC(),
-		src.ptr,
-		srcAlign.toC(),
-		len.ptr,
-		C.bool(volatile),
+		dst.ptr, dstAlign.toC(),
+		src.ptr, srcAlign.toC(),
+		len.ptr, C.bool(volatile),
 	)
 }
 

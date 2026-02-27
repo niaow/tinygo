@@ -1681,38 +1681,26 @@ void LLVMGoCreateMemSet(
 }
 void LLVMGoCreateMemCpy(
 	LLVMBuilderRef builder,
-	LLVMValueRef dst,
-	uint64_t dstAlign,
-	LLVMValueRef src,
-	uint64_t srcAlign,
-	LLVMValueRef len,
-	bool isVolatile
+	LLVMValueRef dst, uint64_t dstAlign,
+	LLVMValueRef src, uint64_t srcAlign,
+	LLVMValueRef len, bool isVolatile
 ) {
 	unwrap(builder)->CreateMemCpy(
-		unwrap(dst),
-		MaybeAlign(dstAlign),
-		unwrap(src),
-		MaybeAlign(srcAlign),
-		unwrap(len),
-		isVolatile
+		unwrap(dst), MaybeAlign(dstAlign),
+		unwrap(src), MaybeAlign(srcAlign),
+		unwrap(len), isVolatile
 	);
 }
 void LLVMGoCreateMemMove(
 	LLVMBuilderRef builder,
-	LLVMValueRef dst,
-	uint64_t dstAlign,
-	LLVMValueRef src,
-	uint64_t srcAlign,
-	LLVMValueRef len,
-	bool isVolatile
+	LLVMValueRef dst, uint64_t dstAlign,
+	LLVMValueRef src, uint64_t srcAlign,
+	LLVMValueRef len, bool isVolatile
 ) {
 	unwrap(builder)->CreateMemMove(
-		unwrap(dst),
-		MaybeAlign(dstAlign),
-		unwrap(src),
-		MaybeAlign(srcAlign),
-		unwrap(len),
-		isVolatile
+		unwrap(dst), MaybeAlign(dstAlign),
+		unwrap(src), MaybeAlign(srcAlign),
+		unwrap(len), isVolatile
 	);
 }
 // Aggregate manipulation

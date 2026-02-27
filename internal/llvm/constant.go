@@ -20,6 +20,12 @@ func (t Type) Zero() Constant {
 	return Constant{Value{C.LLVMConstNull(t.ptr)}}
 }
 
+// Poison returns the poison value of the type.
+func (t Type) Poison() Constant {
+	// TODO: is this valid for all types?
+	return Constant{Value{C.LLVMGetPoison(t.ptr)}}
+}
+
 // IsConstantZero checks if this is the zero value constant of the type.
 // This is equivalent to v == Value(v.Type().Zero()).
 func (v Value) IsConstantZero() bool {

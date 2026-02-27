@@ -692,21 +692,15 @@ void LLVMGoCreateMemSet(
 );
 void LLVMGoCreateMemCpy(
 	LLVMBuilderRef builder,
-	LLVMValueRef dst,
-	uint64_t dstAlign,
-	LLVMValueRef src,
-	uint64_t srcAlign,
-	LLVMValueRef len,
-	bool isVolatile
+	LLVMValueRef dst, uint64_t dstAlign,
+	LLVMValueRef src, uint64_t srcAlign,
+	LLVMValueRef len, bool isVolatile
 );
 void LLVMGoCreateMemMove(
 	LLVMBuilderRef builder,
-	LLVMValueRef dst,
-	uint64_t dstAlign,
-	LLVMValueRef src,
-	uint64_t srcAlign,
-	LLVMValueRef len,
-	bool isVolatile
+	LLVMValueRef dst, uint64_t dstAlign,
+	LLVMValueRef src, uint64_t srcAlign,
+	LLVMValueRef len, bool isVolatile
 );
 // Aggregate manipulation
 LLVMValueRef LLVMGoCreateAggregate(
