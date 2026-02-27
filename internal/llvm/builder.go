@@ -2,6 +2,7 @@ package llvm
 
 /*
 #include "bindings.h"
+#include "limits.h"
 */
 import "C"
 import (
@@ -1587,12 +1588,20 @@ func (b Builder) Select(condition, ifTrue, ifFalse Value, name string) Value {
 	)}
 }
 
-// CallDirect calls a function using its defined signature.
-func (b Builder) CallDirect(callee Function, args ...Value) Value {
-	panic("TODO")
-}
+// Call a function with an explicit signature.
+func (b Builder) Call(signature Signature, callee Value, name string, args ...Value) Value {
+	if uint64(len(args)) >= C.UINT_MAX {
+		// The total operand count is stored into a C.unsigned.
+		// This total includes the callee and the arguments.
+		panic("too many arguments")
+	}
 
-// CallIndirect calls a function with an explicit signature.
-func (b Builder) CallIndirect(signature Signature, callee Value, args ...Value) Value {
-	panic("TODO")
+	return Value{C.LLVMGoCreateCall(
+		b.ptr,
+		signature.toC(),
+		callee.ptr,
+		(*C.LLVMValueRef)(unsafe.Pointer(unsafe.SliceData(args))),
+		C.size_t(len(args)),
+		stringRef(name),
+	)}
 }

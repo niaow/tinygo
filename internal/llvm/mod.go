@@ -181,6 +181,7 @@ type Function struct {
 func (mod Module) CreateFunction(
 	name string,
 	signature Signature,
+	addrSpace uint32,
 	link LinkConfig,
 ) Function {
 	var fn Function
@@ -188,6 +189,7 @@ func (mod Module) CreateFunction(
 		mod.ptr,
 		stringRef(name),
 		signature.toC(),
+		C.unsigned(addrSpace),
 		link.toC(),
 	)
 	return fn
@@ -200,9 +202,6 @@ type Signature struct {
 	// Convention is the calling convention for the function.
 	Convention CallingConvention
 
-	// AddrSpace specifies the address space of the function.
-	AddrSpace uint32
-
 	// Attributes is a list of attributes for the function/call.
 	// NOTE: ABI attributes must match between the function and the call site.
 	Attributes AttributeList
@@ -210,10 +209,9 @@ type Signature struct {
 
 func (sig Signature) toC() C.LLVMGoSignature {
 	return C.LLVMGoSignature{
-		ty:        sig.Type.ptr,
-		conv:      C.unsigned(sig.Convention),
-		addrSpace: C.unsigned(sig.AddrSpace),
-		attrs:     sig.Attributes.ptr,
+		ty:    sig.Type.ptr,
+		conv:  C.unsigned(sig.Convention),
+		attrs: sig.Attributes.ptr,
 	}
 }
 
@@ -225,7 +223,6 @@ func signatureFromC(src C.LLVMGoSignature) Signature {
 	return Signature{
 		Type:       Type{src.ty},
 		Convention: CallingConvention(src.conv),
-		AddrSpace:  uint32(src.addrSpace),
 		Attributes: AttributeList{src.attrs},
 	}
 }

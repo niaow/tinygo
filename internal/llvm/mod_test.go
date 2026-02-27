@@ -196,6 +196,7 @@ func TestFunc(t *testing.T) {
 	for _, f := range []struct {
 		name      string
 		signature llvm.Signature
+		addrSpace uint32
 		link      llvm.LinkConfig
 		str       string
 	}{
@@ -253,10 +254,18 @@ func TestFunc(t *testing.T) {
 			},
 			str: "declare dllimport i32 @printf(ptr, ...) local_unnamed_addr",
 		},
+		{
+			name: "romFunc",
+			signature: llvm.Signature{
+				Type: ctx.Function(ctx.Void(), false),
+			},
+			addrSpace: 1,
+			str:       "declare void @romFunc() addrspace(1)",
+		},
 	} {
 		t.Run(f.name, func(t *testing.T) {
 			// Create the function declaration.
-			fn := mod.CreateFunction(f.name, f.signature, f.link)
+			fn := mod.CreateFunction(f.name, f.signature, f.addrSpace, f.link)
 
 			// Stringify the function declaration.
 			if str := fn.LongString(); str != f.str {
@@ -271,6 +280,11 @@ func TestFunc(t *testing.T) {
 			// Read the signature back.
 			if sig := fn.Signature(); sig != f.signature {
 				t.Error("unexpected signature:", sig)
+			}
+
+			// The reference type should be a pointer in the specified address space.
+			if refTy := fn.Type(); refTy != ctx.Pointer(f.addrSpace) {
+				t.Error("unexpected reference type:", refTy)
 			}
 
 			// Read the link config back.
@@ -295,6 +309,8 @@ declare internal fastcc noundef i64 @mulWide(i32 noundef, i32 noundef) unnamed_a
 declare internal tailcc i64 @ack(i64, i64) unnamed_addr
 
 declare dllimport i32 @printf(ptr, ...) local_unnamed_addr
+
+declare void @romFunc() addrspace(1)
 
 attributes #0 = { inlinehint nounwind }
 `

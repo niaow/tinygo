@@ -267,12 +267,13 @@ LLVMValueRef LLVMGoCreateFunction(
 	LLVMModuleRef mod,
 	LLVMGoStringRef name,
 	LLVMGoSignature signature,
+	unsigned addrSpace,
 	LLVMGoLinkConfig link
 ) {
 	Function* fn = Function::Create(
 		unwrap<FunctionType>(signature.ty),
 		unwrap(link.linkage),
-		signature.addrSpace,
+		addrSpace,
 		toTwine(name),
 		unwrap(mod)
 	);
@@ -310,7 +311,6 @@ LLVMGoSignature LLVMGoFunctionSignature(LLVMValueRef fn) {
 	return {
 		.ty = wrap(f->getFunctionType()),
 		.conv = f->getCallingConv(),
-		.addrSpace = f->getAddressSpace(),
 		.attrs = goWrap(wrap(&f->getContext()), f->getAttributes()),
 	};
 }
@@ -1844,6 +1844,26 @@ LLVMValueRef LLVMGoCreateSelect(
 		unwrap(ifFalse),
 		toTwine(name)
 	));
+}
+LLVMValueRef LLVMGoCreateCall(
+	LLVMBuilderRef builder,
+	LLVMGoSignature signature,
+	LLVMValueRef callee,
+	LLVMValueRef* args,
+	size_t argsLen,
+	LLVMGoStringRef name
+) {
+	CallInst* inst = unwrap(builder)->CreateCall(
+		unwrap<FunctionType>(signature.ty),
+		unwrap(callee),
+		ArrayRef<Value*>(unwrap(args), argsLen),
+		toTwine(name)
+	);
+	inst->setCallingConv(signature.conv);
+	if (signature.attrs != nullptr) {
+		inst->setAttributes(unwrap(signature.attrs)->list);
+	}
+	return wrap(inst);
 }
 
 LLVMTypeRef LLVMGoCreateNamedStruct(

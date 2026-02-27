@@ -22,7 +22,7 @@ func TestBuildDoNothing(t *testing.T) {
 	// Create a function with no arguments that returns void.
 	fn := mod.CreateFunction("doNothing", llvm.Signature{
 		Type: ctx.Function(ctx.Void(), false),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -62,7 +62,7 @@ func TestBuilderIntCasts(t *testing.T) {
 			i8, i8, i8, i8,
 			i32, i32,
 		), false, i16),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -124,7 +124,7 @@ func TestBuilderZextNNeg(t *testing.T) {
 	i32 := ctx.Int(32)
 	fn := mod.CreateFunction("zextNNeg", llvm.Signature{
 		Type: ctx.Function(i32, false, i8),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -162,7 +162,7 @@ func TestBuilderIntMath(t *testing.T) {
 	i32 := ctx.Int(32)
 	fn := mod.CreateFunction("intMath", llvm.Signature{
 		Type: ctx.Function(ctx.Array(18, i32), false, i32, i32),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -255,7 +255,7 @@ func TestBuilderIntCompare(t *testing.T) {
 	i32 := ctx.Int(32)
 	fn := mod.CreateFunction("intCompare", llvm.Signature{
 		Type: ctx.Function(ctx.Array(10, i1), false, i32, i32),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -323,7 +323,7 @@ func TestBuildIntMinMax(t *testing.T) {
 	i32 := ctx.Int(32)
 	fn := mod.CreateFunction("minMax", llvm.Signature{
 		Type: ctx.Function(ctx.Array(4, i32), false, i32, i32, i32, i32),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -382,7 +382,7 @@ func TestBuildShift(t *testing.T) {
 	i32 := ctx.Int(32)
 	fn := mod.CreateFunction("shift", llvm.Signature{
 		Type: ctx.Function(ctx.Array(9, i32), false, i32, i32),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -446,7 +446,7 @@ func TestBitwise(t *testing.T) {
 	i32 := ctx.Int(32)
 	fn := mod.CreateFunction("bitwise", llvm.Signature{
 		Type: ctx.Function(ctx.Array(3, i32), false, i32, i32),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -497,7 +497,7 @@ func TestOrDisjoint(t *testing.T) {
 	i32 := ctx.Int(32)
 	fn := mod.CreateFunction("orDisjoint", llvm.Signature{
 		Type: ctx.Function(i32, false, i32, i32),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -537,7 +537,7 @@ func TestBitIntrinsics(t *testing.T) {
 	i32 := ctx.Int(32)
 	fn := mod.CreateFunction("bitIntrinsics", llvm.Signature{
 		Type: ctx.Function(ctx.Array(7, i32), false, i32),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -600,7 +600,7 @@ func TestFloatConvert(t *testing.T) {
 			f32, f32, f32,
 			i8, i8,
 		), false, f32, f64, i8),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -659,7 +659,7 @@ func TestBuilderFloatMath(t *testing.T) {
 	f32 := ctx.Float32()
 	fn := mod.CreateFunction("floatMath", llvm.Signature{
 		Type: ctx.Function(ctx.Array(6, f32), false, f32, f32),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -716,7 +716,7 @@ func TestBuilderFloatCompare(t *testing.T) {
 	f32 := ctx.Float32()
 	fn := mod.CreateFunction("floatCompare", llvm.Signature{
 		Type: ctx.Function(ctx.Array(14, i1), false, f32, f32),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -796,7 +796,7 @@ func TestBuildFloatMinMax(t *testing.T) {
 	f32 := ctx.Float32()
 	fn := mod.CreateFunction("floatMinMax", llvm.Signature{
 		Type: ctx.Function(ctx.Array(2, f32), false, f32, f32, f32, f32),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -847,7 +847,7 @@ func TestBuildOtherCasts(t *testing.T) {
 	f32 := ctx.Float32()
 	fn := mod.CreateFunction("casts", llvm.Signature{
 		Type: ctx.Function(ctx.LiteralStruct(i32, ptr, f32), false, ptr, i32),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -898,7 +898,7 @@ func TestMem(t *testing.T) {
 	arr := ctx.Array(4, i8)
 	fn := mod.CreateFunction("memCast", llvm.Signature{
 		Type: ctx.Function(arr, false, i32),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -940,7 +940,7 @@ func TestAtomicLoad(t *testing.T) {
 	ptr := ctx.Pointer(0)
 	fn := mod.CreateFunction("atomicLoad", llvm.Signature{
 		Type: ctx.Function(ctx.Array(7, i32), false, ptr),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -1031,7 +1031,7 @@ func TestCASLoop(t *testing.T) {
 				ctx.IntAttribute(llvm.AttributeDereferenceable, 4),
 			),
 		),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Create the entry block.
 	builder := ctx.Builder()
@@ -1123,7 +1123,7 @@ func TestAtomicRMW(t *testing.T) {
 			false,
 			ctx.Pointer(0), i32, f32,
 		),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -1271,7 +1271,7 @@ func TestAtomicRMW_LLVM16(t *testing.T) {
 	i32 := ctx.Int(32)
 	fn := mod.CreateFunction("atomicrmw", llvm.Signature{
 		Type: ctx.Function(ctx.Array(2, i32), false, ctx.Pointer(0), i32),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -1319,7 +1319,7 @@ func TestAtomicRMW_LLVM20(t *testing.T) {
 	i32 := ctx.Int(32)
 	fn := mod.CreateFunction("atomicrmw", llvm.Signature{
 		Type: ctx.Function(ctx.Array(2, i32), false, ctx.Pointer(0), i32),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -1367,7 +1367,7 @@ func TestAtomicRMW_LLVM21(t *testing.T) {
 	f32 := ctx.Float32()
 	fn := mod.CreateFunction("atomicrmw", llvm.Signature{
 		Type: ctx.Function(ctx.Array(2, f32), false, ctx.Pointer(0), f32),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -1410,7 +1410,7 @@ func TestBuilder_MemSet(t *testing.T) {
 	// Create a function.
 	fn := mod.CreateFunction("testMemSet", llvm.Signature{
 		Type: ctx.Function(ctx.Void(), false, ctx.Pointer(0)),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -1449,7 +1449,7 @@ func TestBuilder_MemCopy(t *testing.T) {
 	ptr := ctx.Pointer(0)
 	fn := mod.CreateFunction("testMemCopy", llvm.Signature{
 		Type: ctx.Function(ctx.Void(), false, ptr, ptr, ctx.Int(32)),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -1498,7 +1498,7 @@ func TestBuilder_MemMove(t *testing.T) {
 	ptr := ctx.Pointer(0)
 	fn := mod.CreateFunction("testMemMove", llvm.Signature{
 		Type: ctx.Function(ctx.Void(), false, ptr, ptr, ctx.Int(32)),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -1549,7 +1549,7 @@ func TestBuilder_BuildAggregate(t *testing.T) {
 	slice := ctx.NamedStruct("runtime._slice", ptr, i32, i32)
 	fn := mod.CreateFunction("buildAggregate", llvm.Signature{
 		Type: ctx.Function(slice, false, ptr, i32, i32),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -1593,7 +1593,7 @@ func TestBuilder_InsertValue(t *testing.T) {
 	slice := ctx.NamedStruct("runtime._slice", ptr, i32, i32)
 	fn := mod.CreateFunction("insertvalue", llvm.Signature{
 		Type: ctx.Function(slice, false, ptr, i32, i32),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -1639,7 +1639,7 @@ func TestBuilder_ExtractValue(t *testing.T) {
 	slice := ctx.NamedStruct("runtime._slice", ptr, i32, i32)
 	fn := mod.CreateFunction("getLen", llvm.Signature{
 		Type: ctx.Function(i32, false, slice),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -1677,7 +1677,7 @@ func TestBuilder_If(t *testing.T) {
 	i32 := ctx.Int(32)
 	fn := mod.CreateFunction("testIf", llvm.Signature{
 		Type: ctx.Function(i32, false, ctx.Int(1)),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Create the entry block.
 	builder := ctx.Builder()
@@ -1738,7 +1738,7 @@ func TestBuilder_Switch(t *testing.T) {
 	i32 := ctx.Int(32)
 	fn := mod.CreateFunction("testSwitch", llvm.Signature{
 		Type: ctx.Function(i32, false, ctx.Int(8)),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Create the entry block.
 	builder := ctx.Builder()
@@ -1816,7 +1816,7 @@ func TestBuilder_Select(t *testing.T) {
 	i32 := ctx.Int(32)
 	fn := mod.CreateFunction("select", llvm.Signature{
 		Type: ctx.Function(i32, false, ctx.Int(1)),
-	}, llvm.LinkConfig{})
+	}, 0, llvm.LinkConfig{})
 
 	// Populate the function body.
 	builder := ctx.Builder()
@@ -1842,4 +1842,121 @@ define i32 @select(i1 %0) {
   %select = select i1 %0, i32 5, i32 7
   ret i32 %select
 }
+`
+
+func TestBuilder_Ackermann(t *testing.T) {
+	t.Parallel()
+
+	// Create a context to test with.
+	ctx := llvm.CreateContext()
+	defer ctx.Destroy()
+
+	// Create a module.
+	mod := ctx.CreateModule("", "", llvm.DataLayout{})
+	defer mod.Destroy()
+
+	// Create a function.
+	i32 := ctx.Int(32)
+	noUndefSet := ctx.AttributeSet(ctx.EnumAttribute(llvm.AttributeNoUndef))
+	sig := llvm.Signature{
+		Type:       ctx.Function(i32, false, i32, i32),
+		Convention: llvm.CallingConventionFast,
+		Attributes: ctx.AttributeList(
+			ctx.AttributeSet(ctx.EnumAttribute(llvm.AttributeNoUnwind)),
+			noUndefSet,
+			noUndefSet,
+			noUndefSet,
+		),
+	}
+	fn := mod.CreateFunction("ack", sig, 0, llvm.LinkConfig{})
+
+	// Populate the function body.
+	/*
+		func ack(m, n uint32) uint32 {
+			for m != 0 {
+				if n != 0 {
+					n = ack(m, n-1)
+				} else {
+					n = 1
+				}
+				m--
+			}
+			return n + 1
+		}
+	*/
+	builder := ctx.Builder()
+	defer builder.Destroy()
+	entry := fn.AppendBasicBlock("entry")
+	builder.AtEnd(entry)
+	loopHeader := fn.AppendBasicBlock("loop.header")
+	// for m != 0 {
+	builder.Jump(loopHeader)
+	builder.AtEnd(loopHeader)
+	m := builder.Phi(i32, "m", llvm.PhiIncoming{fn.Param(0), entry})
+	n := builder.Phi(i32, "n", llvm.PhiIncoming{fn.Param(1), entry})
+	body, exit := builder.If(
+		builder.Compare(llvm.IntNotEqual, m.Value, i32.Zero().Value, "loop.cond"),
+		"loop.body", "loop.exit",
+	)
+	// if n != 0 {
+	recurse, cont := builder.If(
+		builder.Compare(llvm.IntNotEqual, n.Value, i32.Zero().Value, "recurse.cond"),
+		"recurse", "loop.continue",
+	)
+	// n = ack(m, n-1)
+	ndec := builder.Subtract(n.Value, ctx.ConstInt(32, 1).Value, "n.dec", true, false)
+	nrec := builder.Call(sig, fn.Value, "n.recurse", m.Value, ndec)
+	// m--
+	builder.Jump(cont)
+	builder.AtEnd(cont)
+	nNext := builder.Phi(i32, "n.next",
+		llvm.PhiIncoming{ctx.ConstInt(32, 1).Value, body},
+		llvm.PhiIncoming{nrec, recurse},
+	)
+	mdec := builder.Subtract(m.Value, ctx.ConstInt(32, 1).Value, "m.dec", true, false)
+	builder.Jump(loopHeader)
+	m.Add(llvm.PhiIncoming{mdec, cont})
+	n.Add(llvm.PhiIncoming{nNext.Value, cont})
+	// return n + 1
+	builder.AtEnd(exit)
+	builder.Return(builder.Add(n.Value, ctx.ConstInt(32, 1).Value, "result", true, false))
+
+	// Compare the module string.
+	if str := mod.String(); str != ackermannMod {
+		t.Errorf("unexpected module string:\n%s", str)
+	}
+}
+
+const ackermannMod = `
+; Function Attrs: nounwind
+define fastcc noundef i32 @ack(i32 noundef %0, i32 noundef %1) #0 {
+entry:
+  br label %loop.header
+
+loop.header:                                      ; preds = %loop.continue, %entry
+  %m = phi i32 [ %0, %entry ], [ %m.dec, %loop.continue ]
+  %n = phi i32 [ %1, %entry ], [ %n.next, %loop.continue ]
+  %loop.cond = icmp ne i32 %m, 0
+  br i1 %loop.cond, label %loop.body, label %loop.exit
+
+loop.body:                                        ; preds = %loop.header
+  %recurse.cond = icmp ne i32 %n, 0
+  br i1 %recurse.cond, label %recurse, label %loop.continue
+
+recurse:                                          ; preds = %loop.body
+  %n.dec = sub nuw i32 %n, 1
+  %n.recurse = call fastcc noundef i32 @ack(i32 noundef %m, i32 noundef %n.dec) #0
+  br label %loop.continue
+
+loop.continue:                                    ; preds = %recurse, %loop.body
+  %n.next = phi i32 [ 1, %loop.body ], [ %n.recurse, %recurse ]
+  %m.dec = sub nuw i32 %m, 1
+  br label %loop.header
+
+loop.exit:                                        ; preds = %loop.header
+  %result = add nuw i32 %n, 1
+  ret i32 %result
+}
+
+attributes #0 = { nounwind }
 `

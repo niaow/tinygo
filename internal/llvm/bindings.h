@@ -126,13 +126,13 @@ LLVMValueRef LLVMGoCreateExternalGlobal(
 typedef struct {
 	LLVMTypeRef ty;
 	unsigned conv;
-	unsigned addrSpace;
 	LLVMGoAttributeListRef attrs;
 } LLVMGoSignature;
 LLVMValueRef LLVMGoCreateFunction(
 	LLVMModuleRef mod,
 	LLVMGoStringRef name,
 	LLVMGoSignature signature,
+	unsigned addrSpace,
 	LLVMGoLinkConfig link
 );
 LLVMGoLinkConfig LLVMGoLinkInfo(LLVMValueRef v);
@@ -772,6 +772,14 @@ LLVMValueRef LLVMGoCreateSelect(
 	LLVMValueRef condition,
 	LLVMValueRef ifTrue,
 	LLVMValueRef ifFalse,
+	LLVMGoStringRef name
+);
+LLVMValueRef LLVMGoCreateCall(
+	LLVMBuilderRef builder,
+	LLVMGoSignature signature,
+	LLVMValueRef callee,
+	LLVMValueRef* args,
+	size_t argsLen,
 	LLVMGoStringRef name
 );
 
